@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,34 @@ export default function LoginScreen() {
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    checkExistingSession();
+  }, []);
+
+  const checkExistingSession = async () => {
+    try {
+      const loggedIn = await AsyncStorage.getItem('doctorLoggedIn');
+      const savedPhone = await AsyncStorage.getItem('doctorPhone');
+      const savedName = await AsyncStorage.getItem('doctorName');
+      const savedRoom = await AsyncStorage.getItem('doctorRoom');
+
+      // If all required data exists, auto-login
+      if (loggedIn === 'true' && savedPhone && savedName && savedRoom) {
+        console.log('✅ Auto-login: Session found for', savedName);
+        // Navigate directly to home
+        router.replace('/(doctor)/home');
+      } else {
+        // No valid session, show login form
+        setIsCheckingAuth(false);
+      }
+    } catch (error) {
+      console.error('Error checking session:', error);
+      setIsCheckingAuth(false);
+    }
+  };
 
   const hashPIN = async (pinText: string): Promise<string> => {
     const hash = await Crypto.digestStringAsync(
@@ -61,12 +89,18 @@ export default function LoginScreen() {
       const data = await response.json();
 
       if (data.success) {
-        // FIX: Ensure all values are stored as strings
-        await AsyncStorage.setItem('doctorLoggedIn', 'true');
-        await AsyncStorage.setItem('doctorPhone', String(phoneNumber));
-        await AsyncStorage.setItem('doctorName', String(data.doctorName || ''));
-        await AsyncStorage.setItem('doctorRoom', String(data.roomNumber || ''));
+        // Store all login data as strings
+        await AsyncStorage.multiSet([
+          ['doctorLoggedIn', 'true'],
+          ['doctorPhone', String(phoneNumber)],
+          ['doctorName', String(data.doctorName || 'Doctor')],
+          ['doctorRoom', String(data.roomNumber || 'Room')],
+          ['loginTimestamp', new Date().toISOString()],
+        ]);
 
+        console.log('✅ Login successful:', data.doctorName);
+
+        // Navigate to home
         router.replace('/(doctor)/home');
       } else {
         setError(data.message || 'Invalid phone number or PIN');
@@ -97,6 +131,19 @@ export default function LoginScreen() {
   };
 
   const isFormValid = phoneNumber.length === 10 && pin.length === 4;
+
+  // Show loading screen while checking for existing session
+  if (isCheckingAuth) {
+    return (
+      <View style={styles.loadingContainer}>
+        <View style={styles.logoBox}>
+          <Text style={styles.logoText}>IIT-DH</Text>
+        </View>
+        <ActivityIndicator size="large" color="#2563EB" style={styles.loader} />
+        <Text style={styles.loadingText}>Loading...</Text>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -180,7 +227,6 @@ export default function LoginScreen() {
               <Text style={styles.loginButtonText}>Sign In</Text>
             )}
           </TouchableOpacity>
-
         </View>
 
         {/* Footer */}
@@ -202,6 +248,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 40,
     justifyContent: 'center',
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loader: {
+    marginTop: 20,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#64748B',
+    fontWeight: '500',
   },
   
   // Header
@@ -342,25 +403,15 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // Demo Info
-  demoInfo: {
-    marginTop: 20,
-    paddingTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
+  // Forgot Password
+  forgotPasswordButton: {
+    marginTop: 16,
+    alignItems: 'center',
   },
-  demoTitle: {
-    fontSize: 12,
+  forgotPasswordText: {
+    fontSize: 14,
+    color: '#2563EB',
     fontWeight: '600',
-    color: '#64748B',
-    marginBottom: 6,
-    textAlign: 'center',
-  },
-  demoText: {
-    fontSize: 12,
-    color: '#64748B',
-    textAlign: 'center',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
 
   // Footer

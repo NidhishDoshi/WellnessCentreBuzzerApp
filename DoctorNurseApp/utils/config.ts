@@ -20,7 +20,7 @@ declare const __DEV__: boolean;
 // ========================================
 // CONFIGURATION - EDIT THIS VALUE
 // ========================================
-const SERVER_IP = '10.200.251.201'; // <-- Change this to your server's IP address
+const SERVER_IP = '10.200.241.16'; // <-- Change this to your server's IP address
 const SERVER_PORT = '3000';
 // ========================================
 

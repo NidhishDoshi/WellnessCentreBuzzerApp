@@ -11,6 +11,7 @@ import {
   Animated,
   Platform,
   Vibration,
+  AppState,
 } from 'react-native';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -30,7 +31,7 @@ type CustomAlertProps = {
   visible: boolean;
   title: string;
   message: string;
-  type: 'confirm' | 'warning' | 'success' | 'info';
+  type: 'confirm' | 'warning' | 'success' | 'info' | 'error';
   onConfirm: () => void;
   onCancel: () => void;
   confirmText?: string;
@@ -75,6 +76,8 @@ function CustomAlert({
         return { icon: '✓', color: '#059669', bgColor: '#F0FDF4' };
       case 'info':
         return { icon: 'ℹ️', color: '#F59E0B', bgColor: '#FEF3C7' };
+      case 'error':
+        return { icon: '📡', color: '#DC2626', bgColor: '#FEF2F2' };
     }
   };
 
@@ -139,14 +142,15 @@ function CustomAlert({
 export default function DoctorHomeScreen() {
   const [callStatus, setCallStatus] = useState<CallStatus>('idle');
   const [callTime, setCallTime] = useState<Date | null>(null);
-  const [remainingSeconds, setRemainingSeconds] = useState(600); // 10 minutes = 600 seconds
+  const [remainingSeconds, setRemainingSeconds] = useState(600);
   const [doctorName, setDoctorName] = useState('');
   const [doctorRoom, setDoctorRoom] = useState('');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [serverConnected, setServerConnected] = useState(false);
+  const [showNetworkError, setShowNetworkError] = useState(false);
 
-  // Store current call ID to complete it later
   const currentCallId = useRef<string | number | null>(null);
+  const appState = useRef(AppState.currentState);
 
   // Alert states
   const [callNurseAlert, setCallNurseAlert] = useState(false);
@@ -155,24 +159,100 @@ export default function DoctorHomeScreen() {
   const [timerExpiredAlert, setTimerExpiredAlert] = useState(false);
   const [autoMarkAlert, setAutoMarkAlert] = useState(false);
 
+  // Load persisted call state on mount
+  useEffect(() => {
+    loadPersistedCallState();
+  }, []);
+
+  // Save call state whenever it changes
+  useEffect(() => {
+    saveCallState();
+  }, [callStatus, callTime]);
+
+  // Handle app state changes (foreground/background)
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+        // App came to foreground - restore timer and hide any network error alerts
+        console.log('App came to foreground - restoring timer');
+        loadPersistedCallState();
+        setShowNetworkError(false); // Hide network error alert on resume
+      }
+      appState.current = nextAppState;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  const loadPersistedCallState = async () => {
+    try {
+      const savedStatus = await AsyncStorage.getItem('callStatus');
+      const savedCallTime = await AsyncStorage.getItem('callTime');
+      const savedCallId = await AsyncStorage.getItem('currentCallId');
+
+      if (savedStatus === 'active' && savedCallTime) {
+        const startTime = new Date(savedCallTime);
+        const now = new Date();
+        const elapsedSeconds = Math.floor((now.getTime() - startTime.getTime()) / 1000);
+        const remaining = 600 - elapsedSeconds;
+
+        setCallStatus('active');
+        setCallTime(startTime);
+        setRemainingSeconds(remaining);
+        
+        if (savedCallId) {
+          currentCallId.current = parseInt(savedCallId);
+        }
+
+        console.log('Restored call state:', {
+          startTime,
+          elapsedSeconds,
+          remaining
+        });
+      }
+    } catch (error) {
+      console.error('Error loading call state:', error);
+    }
+  };
+
+  const saveCallState = async () => {
+    try {
+      await AsyncStorage.setItem('callStatus', callStatus);
+      if (callTime) {
+        await AsyncStorage.setItem('callTime', callTime.toISOString());
+      } else {
+        await AsyncStorage.removeItem('callTime');
+      }
+      if (currentCallId.current) {
+        await AsyncStorage.setItem('currentCallId', String(currentCallId.current));
+      } else {
+        await AsyncStorage.removeItem('currentCallId');
+      }
+    } catch (error) {
+      console.error('Error saving call state:', error);
+    }
+  };
+
   // Initialize socket connection
   useEffect(() => {
-    // Initialize socket
     initSocket();
 
-    // Add connection listener
     const unsubscribe = addConnectionListener((connected) => {
       setServerConnected(connected);
       console.log('Server connection status:', connected);
+      
+      // Show network error if disconnected
+      if (!connected) {
+        setShowNetworkError(true);
+      }
     });
 
-    // Set initial connection state
     setServerConnected(isConnected());
 
-    // Cleanup on unmount
     return () => {
       unsubscribe();
-      // Don't disconnect socket here to keep connection alive
     };
   }, []);
 
@@ -197,35 +277,34 @@ export default function DoctorHomeScreen() {
     try {
       const name = await AsyncStorage.getItem('doctorName');
       const room = await AsyncStorage.getItem('doctorRoom');
+      const formattedRoom = room 
+        ? (room.startsWith('Room') ? room : `Room ${room}`)
+        : 'Room';
+      
       setDoctorName(name || 'Doctor');
-      setDoctorRoom(room || 'Room');
+      setDoctorRoom(formattedRoom);
     } catch (error) {
       console.error('Error loading doctor data:', error);
     }
   };
 
-  // Play system notification sound and vibration
   const playNotificationSound = async (type: 'success' | 'warning' | 'info') => {
     if (!soundEnabled) return;
 
     try {
-      // Play system sound using Audio
       const { sound } = await Audio.Sound.createAsync(
-        // Use default notification sound
         require('../../assets/sounds/notification.mp3'),
         { shouldPlay: true, volume: 1.0 }
       );
 
-      // Vibration patterns based on notification type
       if (type === 'success') {
-        Vibration.vibrate([0, 200, 100, 200]); // Double vibration
+        Vibration.vibrate([0, 200, 100, 200]);
       } else if (type === 'warning') {
-        Vibration.vibrate([0, 500, 200, 500, 200, 500]); // Triple long vibration
+        Vibration.vibrate([0, 500, 200, 500, 200, 500]);
       } else if (type === 'info') {
-        Vibration.vibrate(400); // Single long vibration
+        Vibration.vibrate(400);
       }
 
-      // Cleanup
       sound.setOnPlaybackStatusUpdate(async (status) => {
         if (status.isLoaded && status.didJustFinish) {
           await sound.unloadAsync();
@@ -233,37 +312,40 @@ export default function DoctorHomeScreen() {
       });
     } catch (error) {
       console.error('Notification sound error:', error);
-      // Fallback to vibration only if sound fails
       Vibration.vibrate(400);
     }
   };
 
   const handleCallNursePress = () => {
+    // Check if server is connected before showing confirmation
+    if (!serverConnected) {
+      setShowNetworkError(true);
+      return;
+    }
     setCallNurseAlert(true);
   };
 
   const handleConfirmCallNurse = async () => {
     setCallNurseAlert(false);
     
-    // Generate a unique call ID
     const callId = Date.now();
     currentCallId.current = callId;
     
-    // Send call to server
     const sent = sendDoctorCall({
       doctorId: callId,
       doctorName: doctorName,
-      room: doctorRoom.replace('Room ', ''), // Send just the room number
+      room: doctorRoom.replace('Room ', ''),
     });
     
     if (!sent) {
       console.warn('Failed to send call to server - not connected');
-      // Still show local state even if server is not connected
+      setShowNetworkError(true);
     }
     
+    const startTime = new Date();
     setCallStatus('active');
-    setCallTime(new Date());
-    setRemainingSeconds(600); // Reset to 10 minutes
+    setCallTime(startTime);
+    setRemainingSeconds(600);
     await playNotificationSound('success');
   };
 
@@ -274,7 +356,6 @@ export default function DoctorHomeScreen() {
   const handleConfirmAttended = async () => {
     setAttendedAlert(false);
     
-    // Complete call on server
     if (currentCallId.current) {
       const completed = completeCall(currentCallId.current);
       if (!completed) {
@@ -286,6 +367,12 @@ export default function DoctorHomeScreen() {
     setCallStatus('idle');
     setCallTime(null);
     setRemainingSeconds(600);
+    
+    // Clear persisted state
+    await AsyncStorage.removeItem('callStatus');
+    await AsyncStorage.removeItem('callTime');
+    await AsyncStorage.removeItem('currentCallId');
+    
     await playNotificationSound('success');
   };
 
@@ -296,10 +383,15 @@ export default function DoctorHomeScreen() {
   const handleConfirmLogout = async () => {
     setLogoutAlert(false);
     try {
-      await AsyncStorage.removeItem('doctorLoggedIn');
-      await AsyncStorage.removeItem('doctorPhone');
-      await AsyncStorage.removeItem('doctorName');
-      await AsyncStorage.removeItem('doctorRoom');
+      // FIXED: Only clear authentication data, NOT call state
+      // This allows the timer to persist across logout/login
+      await AsyncStorage.multiRemove([
+        'doctorLoggedIn',
+        'doctorPhone',
+        'doctorName',
+        'doctorRoom',
+        // Removed: 'callStatus', 'callTime', 'currentCallId'
+      ]);
       router.replace('/login');
     } catch (error) {
       console.error('Logout error:', error);
@@ -309,12 +401,10 @@ export default function DoctorHomeScreen() {
   const handleCallAgain = async () => {
     setTimerExpiredAlert(false);
     
-    // Complete the old call and create a new one
     if (currentCallId.current) {
       completeCall(currentCallId.current);
     }
     
-    // Generate a new call ID and send to server
     const newCallId = Date.now();
     currentCallId.current = newCallId;
     
@@ -324,8 +414,8 @@ export default function DoctorHomeScreen() {
       room: doctorRoom.replace('Room ', ''),
     });
     
-    // Reset the timer and keep call active
-    setCallTime(new Date());
+    const newStartTime = new Date();
+    setCallTime(newStartTime);
     setRemainingSeconds(600);
     await playNotificationSound('info');
   };
@@ -333,23 +423,25 @@ export default function DoctorHomeScreen() {
   const handleDontCallAgain = async () => {
     setTimerExpiredAlert(false);
     
-    // Complete call on server
     if (currentCallId.current) {
       completeCall(currentCallId.current);
       currentCallId.current = null;
     }
     
-    // Mark as attended
     setCallStatus('idle');
     setCallTime(null);
     setRemainingSeconds(600);
+    
+    await AsyncStorage.removeItem('callStatus');
+    await AsyncStorage.removeItem('callTime');
+    await AsyncStorage.removeItem('currentCallId');
+    
     await playNotificationSound('success');
   };
 
-  const handleAutoMarkOk = () => {
+  const handleAutoMarkOk = async () => {
     setAutoMarkAlert(false);
     
-    // Complete call on server
     if (currentCallId.current) {
       completeCall(currentCallId.current);
       currentCallId.current = null;
@@ -358,9 +450,16 @@ export default function DoctorHomeScreen() {
     setCallStatus('idle');
     setCallTime(null);
     setRemainingSeconds(600);
+    
+    await AsyncStorage.removeItem('callStatus');
+    await AsyncStorage.removeItem('callTime');
+    await AsyncStorage.removeItem('currentCallId');
   };
 
-  // Format countdown timer
+  const handleNetworkErrorOk = () => {
+    setShowNetworkError(false);
+  };
+
   const getFormattedTime = () => {
     const absSeconds = Math.abs(remainingSeconds);
     const minutes = Math.floor(absSeconds / 60);
@@ -368,13 +467,16 @@ export default function DoctorHomeScreen() {
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // Main timer effect - counts down from 10 minutes
+  // Main timer effect - updates every second
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     
     if (callStatus === 'active' && callTime) {
       interval = setInterval(() => {
-        setRemainingSeconds((prev) => prev - 1);
+        const now = new Date();
+        const elapsedSeconds = Math.floor((now.getTime() - callTime.getTime()) / 1000);
+        const remaining = 600 - elapsedSeconds;
+        setRemainingSeconds(remaining);
       }, 1000);
     }
 
@@ -401,30 +503,29 @@ export default function DoctorHomeScreen() {
   // Check for 20 minute mark (auto mark attended)
   useEffect(() => {
     if (callStatus === 'active' && remainingSeconds === -600) {
-      // 20 minutes total = -600 seconds (10 min after timer expired)
       setAutoMarkAlert(true);
       playNotificationSound('warning');
       
-      // Complete call on server
       if (currentCallId.current) {
         completeCall(currentCallId.current);
         currentCallId.current = null;
       }
       
-      // Auto mark as attended
-      setTimeout(() => {
+      setTimeout(async () => {
         setCallStatus('idle');
         setCallTime(null);
         setRemainingSeconds(600);
-      }, 3000); // Show alert for 3 seconds then auto dismiss
+        await AsyncStorage.removeItem('callStatus');
+        await AsyncStorage.removeItem('callTime');
+        await AsyncStorage.removeItem('currentCallId');
+      }, 3000);
     }
   }, [remainingSeconds, callStatus]);
 
-  // Get timer color based on remaining time
   const getTimerColor = () => {
-    if (remainingSeconds <= 0) return '#DC2626'; // Red when expired
-    if (remainingSeconds <= 120) return '#F59E0B'; // Orange when < 2 min
-    return '#0066CC'; // Blue otherwise
+    if (remainingSeconds <= 0) return '#DC2626';
+    if (remainingSeconds <= 120) return '#F59E0B';
+    return '#0066CC';
   };
 
   return (
@@ -446,7 +547,6 @@ export default function DoctorHomeScreen() {
           </View>
         </View>
         <View style={styles.headerActions}>
-          {/* Sound Toggle */}
           <TouchableOpacity
             style={styles.soundButton}
             onPress={() => setSoundEnabled(!soundEnabled)}
@@ -457,7 +557,6 @@ export default function DoctorHomeScreen() {
             </Text>
           </TouchableOpacity>
           
-          {/* Logout Button */}
           <TouchableOpacity
             style={styles.logoutButton}
             onPress={handleLogoutPress}
@@ -595,6 +694,18 @@ export default function DoctorHomeScreen() {
         singleButton={true}
         onConfirm={handleAutoMarkOk}
         onCancel={handleAutoMarkOk}
+      />
+
+      <CustomAlert
+        visible={showNetworkError}
+        title="Connection Error"
+        message="Please connect to IITDH Intranet (WiFi) or the server is offline."
+        type="error"
+        confirmText="OK"
+        cancelText=""
+        singleButton={true}
+        onConfirm={handleNetworkErrorOk}
+        onCancel={handleNetworkErrorOk}
       />
 
       <CustomAlert
@@ -832,7 +943,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  // Custom Alert Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',

@@ -45,7 +45,7 @@ export function initSocket(): Socket {
   });
 
   socket.on('connect_error', (error: Error) => {
-    console.error('Socket connection error:', error.message);
+    // console.error('Socket connection error:', error.message);
     notifyConnectionListeners(false);
   });
 
