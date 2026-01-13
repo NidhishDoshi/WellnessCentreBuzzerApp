@@ -86,8 +86,10 @@ io.on('connection', (socket) => {
   socket.on('doctorCall', (data) => {
     console.log('Doctor call received:', data);
     
+    // Use the doctorId from the app as the call ID for consistency
+    // This ensures the app can complete the same call it created
     const call = {
-      id: Date.now(),
+      id: data.doctorId || Date.now(),
       doctorId: data.doctorId,
       doctorName: data.doctorName,
       room: data.room || 'Unknown',

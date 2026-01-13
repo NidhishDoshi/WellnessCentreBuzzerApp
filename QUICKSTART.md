@@ -49,22 +49,21 @@
 
 ### Step 3: Setup the Mobile App (2 minutes)
 
-1. Open `mobile-app/src/config.js` in a text editor
-2. Change line 2 to your server's IP:
-   ```javascript
-   export const SERVER_URL = 'http://YOUR_SERVER_IP:3000';
-   export const SOCKET_URL = 'http://YOUR_SERVER_IP:3000';
+1. Open `DoctorNurseApp/utils/config.ts` in a text editor
+2. Find the `SERVER_IP` variable and change it to your server's IP:
+   ```typescript
+   const SERVER_IP = '192.168.1.100'; // <-- Change this to your server's IP address
    ```
 3. Save the file
 4. Install dependencies (first time only):
    ```bash
-   cd "d:\Downloads\Wellness Centre\mobile-app"
+   cd "d:\Downloads\Wellness Centre\DoctorNurseApp"
    npm install
    ```
 5. Connect your Android device via USB or start an emulator
 6. Run the app:
    ```bash
-   npm run android
+   npx expo start --android
    ```
 
 ✅ App should open on your device/emulator
@@ -74,50 +73,34 @@
 ## 🎯 Test the System
 
 ### Test as Doctor:
-1. In the mobile app, login with:
-   - Username: `dr.smith`
-   - Password: `doctor123`
-2. Enter room number: `101`
-3. Press "Call Nurse" button
-4. Check the TV display - you should see the call appear!
-
-### Test as Staff:
-1. In another device or after logging out:
-   - Username: `nurse.mary`
-   - Password: `staff123`
-2. You should see the active call from Dr. Smith
-3. Press "Complete" to clear the call
+1. In the mobile app, login with your credentials (configured in Google Sheets)
+2. Press "Call Nurse" button
+3. Check the TV display - you should see the call appear!
+4. The TV display will show doctor name, room number, and call time
+5. Press "Mark as Attended" when the nurse arrives to clear the call
 
 ---
 
 ## ⚙️ IP Address Configuration Summary
 
-You need to update the server IP in 3 places:
+You need to update the server IP in 2 places:
 
-| File | Line | What to Change |
-|------|------|----------------|
-| `mobile-app/src/config.js` | 2-3 | `SERVER_URL` and `SOCKET_URL` |
-| `tv-display/app.js` | 2 | `SERVER_URL` |
-| `server/.env` | 2 | `ALLOWED_IP_RANGE` (optional) |
+| File | Variable | What to Change |
+|------|----------|----------------|
+| `DoctorNurseApp/utils/config.ts` | `SERVER_IP` | Your server's local IP |
+| `tv-display/app.js` | `SERVER_URL` | Full URL with port |
 
 **Example:**
-If your server IP is `192.168.1.100`, change all URLs to:
-```
-http://192.168.1.100:3000
-```
+If your server IP is `192.168.1.100`:
+- In `config.ts`: `const SERVER_IP = '192.168.1.100';`
+- In `app.js`: `const SERVER_URL = 'http://192.168.1.100:3000';`
 
 ---
 
-## 🔐 Default Login Credentials
+## 🔐 Login Credentials
 
-### Doctors:
-| Username | Password | Name |
-|----------|----------|------|
-| dr.smith | doctor123 | Dr. Smith |
-| dr.jones | doctor123 | Dr. Jones |
-| dr.wilson | doctor123 | Dr. Wilson |
-
-### Staff:
+Doctor/Staff credentials are managed through the Google Sheets backend.
+Contact your administrator for login credentials.
 | Username | Password | Name |
 |----------|----------|------|
 | nurse.mary | staff123 | Nurse Mary |
@@ -127,26 +110,25 @@ http://192.168.1.100:3000
 
 ## 🐛 Common Issues
 
-### Issue: "Connection Error" on mobile app
+### Issue: "Offline" status on mobile app
 **Solution:** 
 - Check that server is running
-- Verify IP address in `config.js`
+- Verify SERVER_IP in `DoctorNurseApp/utils/config.ts`
 - Make sure device and server are on same Wi-Fi network
 - Check firewall isn't blocking port 3000
 
 ### Issue: TV Display shows "Disconnected"
 **Solution:**
-- Check SERVER_URL in `app.js`
+- Check SERVER_URL in `tv-display/app.js`
 - Open browser console (F12) to see error messages
 - Refresh the page
 
-### Issue: Android app won't build
+### Issue: Expo app won't start
 **Solution:**
 ```bash
-cd "d:\Downloads\Wellness Centre\mobile-app\android"
-gradlew clean
-cd ..
-npm run android
+cd "d:\Downloads\Wellness Centre\DoctorNurseApp"
+npm install
+npx expo start --clear
 ```
 
 ### Issue: "Access Denied: IP not in allowed range"
@@ -169,12 +151,13 @@ Keep this terminal open - server must run 24/7
 
 ### On TV/Display:
 1. Open browser in fullscreen (F11)
-2. Navigate to `http://SERVER_IP:8080`
+2. Navigate to `http://SERVER_IP:8080` (if using http-server)
+   Or open `tv-display/index.html` directly in Chrome
 3. Leave browser open on nurse station
 
 ### On Mobile Devices:
-1. Install the app on all doctor and staff devices
-2. Ensure all are on the facility Wi-Fi
+1. Build and install the app on all doctor devices
+2. Ensure all devices are on the facility Wi-Fi
 3. Login with respective credentials
 
 ---
@@ -182,16 +165,22 @@ Keep this terminal open - server must run 24/7
 ## 📞 System Flow
 
 ```
-Doctor presses button in Room 101
+Doctor presses "Call Nurse" in app
          ↓
-    Signal sent to server
+    Signal sent via Socket.IO
          ↓
     Server broadcasts to all clients
          ↓
 ┌────────────────┬────────────────┐
 ↓                ↓                ↓
-TV Display    Staff Phones    Other Devices
-(Shows call)  (Notification)  (Get update)
+TV Display    Mobile App      Other Displays
+(Shows call)  (Local state)   (Shows call)
+
+Doctor presses "Mark as Attended"
+         ↓
+    Call completed on server
+         ↓
+    Removed from all displays
 ```
 
 ---

@@ -1,6 +1,6 @@
 // app/(doctor)/home.tsx
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,14 @@ import {
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
+import {
+  initSocket,
+  disconnectSocket,
+  sendDoctorCall,
+  completeCall,
+  addConnectionListener,
+  isConnected,
+} from '../../utils/socket';
 
 type CallStatus = 'idle' | 'active';
 
@@ -135,6 +143,10 @@ export default function DoctorHomeScreen() {
   const [doctorName, setDoctorName] = useState('');
   const [doctorRoom, setDoctorRoom] = useState('');
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [serverConnected, setServerConnected] = useState(false);
+
+  // Store current call ID to complete it later
+  const currentCallId = useRef<string | number | null>(null);
 
   // Alert states
   const [callNurseAlert, setCallNurseAlert] = useState(false);
@@ -142,6 +154,27 @@ export default function DoctorHomeScreen() {
   const [logoutAlert, setLogoutAlert] = useState(false);
   const [timerExpiredAlert, setTimerExpiredAlert] = useState(false);
   const [autoMarkAlert, setAutoMarkAlert] = useState(false);
+
+  // Initialize socket connection
+  useEffect(() => {
+    // Initialize socket
+    initSocket();
+
+    // Add connection listener
+    const unsubscribe = addConnectionListener((connected) => {
+      setServerConnected(connected);
+      console.log('Server connection status:', connected);
+    });
+
+    // Set initial connection state
+    setServerConnected(isConnected());
+
+    // Cleanup on unmount
+    return () => {
+      unsubscribe();
+      // Don't disconnect socket here to keep connection alive
+    };
+  }, []);
 
   // Load doctor data and setup audio
   useEffect(() => {
@@ -211,6 +244,23 @@ export default function DoctorHomeScreen() {
 
   const handleConfirmCallNurse = async () => {
     setCallNurseAlert(false);
+    
+    // Generate a unique call ID
+    const callId = Date.now();
+    currentCallId.current = callId;
+    
+    // Send call to server
+    const sent = sendDoctorCall({
+      doctorId: callId,
+      doctorName: doctorName,
+      room: doctorRoom.replace('Room ', ''), // Send just the room number
+    });
+    
+    if (!sent) {
+      console.warn('Failed to send call to server - not connected');
+      // Still show local state even if server is not connected
+    }
+    
     setCallStatus('active');
     setCallTime(new Date());
     setRemainingSeconds(600); // Reset to 10 minutes
@@ -223,6 +273,16 @@ export default function DoctorHomeScreen() {
 
   const handleConfirmAttended = async () => {
     setAttendedAlert(false);
+    
+    // Complete call on server
+    if (currentCallId.current) {
+      const completed = completeCall(currentCallId.current);
+      if (!completed) {
+        console.warn('Failed to complete call on server - not connected');
+      }
+      currentCallId.current = null;
+    }
+    
     setCallStatus('idle');
     setCallTime(null);
     setRemainingSeconds(600);
@@ -248,6 +308,22 @@ export default function DoctorHomeScreen() {
 
   const handleCallAgain = async () => {
     setTimerExpiredAlert(false);
+    
+    // Complete the old call and create a new one
+    if (currentCallId.current) {
+      completeCall(currentCallId.current);
+    }
+    
+    // Generate a new call ID and send to server
+    const newCallId = Date.now();
+    currentCallId.current = newCallId;
+    
+    sendDoctorCall({
+      doctorId: newCallId,
+      doctorName: doctorName,
+      room: doctorRoom.replace('Room ', ''),
+    });
+    
     // Reset the timer and keep call active
     setCallTime(new Date());
     setRemainingSeconds(600);
@@ -256,6 +332,13 @@ export default function DoctorHomeScreen() {
 
   const handleDontCallAgain = async () => {
     setTimerExpiredAlert(false);
+    
+    // Complete call on server
+    if (currentCallId.current) {
+      completeCall(currentCallId.current);
+      currentCallId.current = null;
+    }
+    
     // Mark as attended
     setCallStatus('idle');
     setCallTime(null);
@@ -265,6 +348,13 @@ export default function DoctorHomeScreen() {
 
   const handleAutoMarkOk = () => {
     setAutoMarkAlert(false);
+    
+    // Complete call on server
+    if (currentCallId.current) {
+      completeCall(currentCallId.current);
+      currentCallId.current = null;
+    }
+    
     setCallStatus('idle');
     setCallTime(null);
     setRemainingSeconds(600);
@@ -315,6 +405,12 @@ export default function DoctorHomeScreen() {
       setAutoMarkAlert(true);
       playNotificationSound('warning');
       
+      // Complete call on server
+      if (currentCallId.current) {
+        completeCall(currentCallId.current);
+        currentCallId.current = null;
+      }
+      
       // Auto mark as attended
       setTimeout(() => {
         setCallStatus('idle');
@@ -339,7 +435,15 @@ export default function DoctorHomeScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.doctorName}>{doctorName}</Text>
-          <Text style={styles.roomNumber}>{doctorRoom}</Text>
+          <View style={styles.roomAndStatusRow}>
+            <Text style={styles.roomNumber}>{doctorRoom}</Text>
+            <View style={[styles.connectionIndicator, serverConnected && styles.connectionIndicatorConnected]}>
+              <View style={[styles.connectionDot, serverConnected && styles.connectionDotConnected]} />
+              <Text style={[styles.connectionText, serverConnected && styles.connectionTextConnected]}>
+                {serverConnected ? 'Online' : 'Offline'}
+              </Text>
+            </View>
+          </View>
         </View>
         <View style={styles.headerActions}>
           {/* Sound Toggle */}
@@ -545,9 +649,43 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
     marginBottom: 4,
   },
+  roomAndStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   roomNumber: {
     fontSize: 16,
     color: '#666666',
+  },
+  connectionIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#FEE2E2',
+  },
+  connectionIndicatorConnected: {
+    backgroundColor: '#D1FAE5',
+  },
+  connectionDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#DC2626',
+    marginRight: 4,
+  },
+  connectionDotConnected: {
+    backgroundColor: '#059669',
+  },
+  connectionText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#DC2626',
+  },
+  connectionTextConnected: {
+    color: '#059669',
   },
   logoutButton: {
     paddingVertical: 8,

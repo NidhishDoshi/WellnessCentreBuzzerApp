@@ -23,11 +23,15 @@ const notificationSound = document.getElementById('notification-sound');
 
 // Default doctor images (placeholder avatars with different colors)
 const defaultDoctorImages = [
-    'https://ui-avatars.com/api/?name=Doctor&size=200&background=e74c3c&color=fff&bold=true',
-    'https://ui-avatars.com/api/?name=MD&size=200&background=3498db&color=fff&bold=true',
-    'https://ui-avatars.com/api/?name=Dr&size=200&background=2ecc71&color=fff&bold=true',
-    'https://ui-avatars.com/api/?name=Physician&size=200&background=f39c12&color=fff&bold=true',
-    'https://ui-avatars.com/api/?name=Specialist&size=200&background=9b59b6&color=fff&bold=true'
+    'assets/1.png',
+    'assets/2.png',
+    'assets/3.png',
+    'assets/4.png'
+    // 'https://ui-avatars.com/api/?name=Doctor&size=200&background=e74c3c&color=fff&bold=true',
+    // 'https://ui-avatars.com/api/?name=MD&size=200&background=3498db&color=fff&bold=true',
+    // 'https://ui-avatars.com/api/?name=Dr&size=200&background=2ecc71&color=fff&bold=true',
+    // 'https://ui-avatars.com/api/?name=Physician&size=200&background=f39c12&color=fff&bold=true',
+    // 'https://ui-avatars.com/api/?name=Specialist&size=200&background=9b59b6&color=fff&bold=true'
 ];
 
 // Initialize the display
@@ -174,7 +178,8 @@ function createDoctorCard(call) {
 }
 
 // Simple hash function for consistent image selection
-function hashCode(str) {
+function hashCode(value) {
+    const str = String(value); // Convert to string to handle numbers
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
         const char = str.charCodeAt(i);
