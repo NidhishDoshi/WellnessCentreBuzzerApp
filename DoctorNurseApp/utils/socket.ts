@@ -21,6 +21,7 @@ export interface Call {
   room: string;
   timestamp: Date | string;
   status: 'active' | 'completed';
+  type: 'nurse' | 'reception';
 }
 
 /**
@@ -55,8 +56,12 @@ export function initSocket(): Socket {
     notifyCallsListeners(calls);
   });
 
-  socket.on('newCall', (call: Call) => {
-    console.log('New call received:', call);
+  socket.on('newNurseCall', (call: Call) => {
+    console.log('New nurse call received:', call);
+  });
+
+  socket.on('newReceptionCall', (call: Call) => {
+    console.log('New reception call received:', call);
   });
 
   socket.on('callCompleted', (callId: string | number) => {
@@ -91,7 +96,7 @@ export function disconnectSocket(): void {
 }
 
 /**
- * Send a doctor call to the server
+ * Send a nurse call to the server
  */
 export function sendDoctorCall(data: {
   doctorId: string | number;
@@ -103,8 +108,31 @@ export function sendDoctorCall(data: {
     return false;
   }
 
-  console.log('Sending doctor call:', data);
+  console.log('Sending nurse call:', data);
   socket.emit('doctorCall', {
+    doctorId: data.doctorId,
+    doctorName: data.doctorName,
+    room: data.room,
+  });
+
+  return true;
+}
+
+/**
+ * Send a reception call to the server
+ */
+export function sendReceptionCall(data: {
+  doctorId: string | number;
+  doctorName: string;
+  room: string;
+}): boolean {
+  if (!socket?.connected) {
+    console.error('Cannot send call: Socket not connected');
+    return false;
+  }
+
+  console.log('Sending reception call:', data);
+  socket.emit('receptionCall', {
     doctorId: data.doctorId,
     doctorName: data.doctorName,
     room: data.room,
@@ -185,6 +213,7 @@ export default {
   isConnected,
   disconnectSocket,
   sendDoctorCall,
+  sendReceptionCall,
   completeCall,
   addConnectionListener,
   addCallsListener,

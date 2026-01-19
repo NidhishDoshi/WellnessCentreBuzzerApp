@@ -1,26 +1,8 @@
-// utils/config.ts
 
 // Declare __DEV__ for TypeScript
 declare const __DEV__: boolean;
-
-/**
- * Application Configuration
- * 
- * Update the SERVER_IP to match your server's local network IP address.
- * The server should be running on port 3000.
- * 
- * To find your server's IP:
- * - Windows: Run `ipconfig` in command prompt, look for IPv4 Address
- * - macOS/Linux: Run `ifconfig` or `ip addr`, look for inet address
- * 
- * Example: If your server's IP is 192.168.1.100, set:
- * SERVER_IP = '192.168.1.100'
- */
-
-// ========================================
-// CONFIGURATION - EDIT THIS VALUE
-// ========================================
-const SERVER_IP = '10.200.241.16'; // <-- Change this to your server's IP address
+//wellness ip :'10.200.205.182' around range
+const SERVER_IP = '10.200.241.218'; // <-- Change this to your server's IP address
 const SERVER_PORT = '3000';
 // ========================================
 

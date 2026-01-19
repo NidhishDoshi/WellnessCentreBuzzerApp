@@ -12,6 +12,7 @@ import {
   Platform,
   Vibration,
   AppState,
+  ScrollView,
 } from 'react-native';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,144 +21,48 @@ import {
   initSocket,
   disconnectSocket,
   sendDoctorCall,
+  sendReceptionCall,
   completeCall,
   addConnectionListener,
   isConnected,
 } from '../../utils/socket';
+import { CustomAlert } from '../../components/CustomAlert';
 
 type CallStatus = 'idle' | 'active';
 
-type CustomAlertProps = {
-  visible: boolean;
-  title: string;
-  message: string;
-  type: 'confirm' | 'warning' | 'success' | 'info' | 'error';
-  onConfirm: () => void;
-  onCancel: () => void;
-  confirmText?: string;
-  cancelText?: string;
-  singleButton?: boolean;
-};
-
-// Custom Alert Component
-function CustomAlert({
-  visible,
-  title,
-  message,
-  type,
-  onConfirm,
-  onCancel,
-  confirmText = 'Confirm',
-  cancelText = 'Cancel',
-  singleButton = false,
-}: CustomAlertProps) {
-  const [scaleAnim] = useState(new Animated.Value(0));
-
-  useEffect(() => {
-    if (visible) {
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        useNativeDriver: true,
-        tension: 50,
-        friction: 7,
-      }).start();
-    } else {
-      scaleAnim.setValue(0);
-    }
-  }, [visible]);
-
-  const getIconAndColor = () => {
-    switch (type) {
-      case 'confirm':
-        return { icon: '🔔', color: '#0066CC', bgColor: '#EFF6FF' };
-      case 'warning':
-        return { icon: '⚠️', color: '#DC2626', bgColor: '#FEF2F2' };
-      case 'success':
-        return { icon: '✓', color: '#059669', bgColor: '#F0FDF4' };
-      case 'info':
-        return { icon: 'ℹ️', color: '#F59E0B', bgColor: '#FEF3C7' };
-      case 'error':
-        return { icon: '📡', color: '#DC2626', bgColor: '#FEF2F2' };
-    }
-  };
-
-  const { icon, color, bgColor } = getIconAndColor();
-
-  return (
-    <Modal
-      transparent
-      visible={visible}
-      animationType="fade"
-      onRequestClose={onCancel}
-    >
-      <View style={styles.modalOverlay}>
-        <Animated.View
-          style={[
-            styles.alertContainer,
-            { transform: [{ scale: scaleAnim }] },
-          ]}
-        >
-          {/* Icon */}
-          <View style={[styles.iconContainer, { backgroundColor: bgColor }]}>
-            <Text style={styles.iconText}>{icon}</Text>
-          </View>
-
-          {/* Title */}
-          <Text style={styles.alertTitle}>{title}</Text>
-
-          {/* Message */}
-          <Text style={styles.alertMessage}>{message}</Text>
-
-          {/* Buttons */}
-          <View style={styles.buttonContainer}>
-            {!singleButton && (
-              <TouchableOpacity
-                style={[styles.alertButton, styles.cancelButton]}
-                onPress={onCancel}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.cancelButtonText}>{cancelText}</Text>
-              </TouchableOpacity>
-            )}
-
-            <TouchableOpacity
-              style={[
-                styles.alertButton,
-                styles.confirmButton,
-                { backgroundColor: color },
-                singleButton && { flex: 1 },
-              ]}
-              onPress={onConfirm}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.confirmButtonText}>{confirmText}</Text>
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-      </View>
-    </Modal>
-  );
-}
-
 export default function DoctorHomeScreen() {
-  const [callStatus, setCallStatus] = useState<CallStatus>('idle');
-  const [callTime, setCallTime] = useState<Date | null>(null);
-  const [remainingSeconds, setRemainingSeconds] = useState(600);
+  const [nurseCallStatus, setNurseCallStatus] = useState<CallStatus>('idle');
+  const [nurseCallTime, setNurseCallTime] = useState<Date | null>(null);
+  const [nurseRemainingSeconds, setNurseRemainingSeconds] = useState(600);
+
+  const [receptionCallStatus, setReceptionCallStatus] = useState<CallStatus>('idle');
+  const [receptionCallTime, setReceptionCallTime] = useState<Date | null>(null);
+  const [receptionRemainingSeconds, setReceptionRemainingSeconds] = useState(600);
+
   const [doctorName, setDoctorName] = useState('');
   const [doctorRoom, setDoctorRoom] = useState('');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [serverConnected, setServerConnected] = useState(false);
   const [showNetworkError, setShowNetworkError] = useState(false);
 
-  const currentCallId = useRef<string | number | null>(null);
+  const currentNurseCallId = useRef<string | number | null>(null);
+  const currentReceptionCallId = useRef<string | number | null>(null);
   const appState = useRef(AppState.currentState);
 
-  // Alert states
+  // Alert states for Nurse
   const [callNurseAlert, setCallNurseAlert] = useState(false);
-  const [attendedAlert, setAttendedAlert] = useState(false);
+  const [attendedNurseAlert, setAttendedNurseAlert] = useState(false);
+  const [timerNurseExpiredAlert, setTimerNurseExpiredAlert] = useState(false);
+  const [autoMarkNurseAlert, setAutoMarkNurseAlert] = useState(false);
+
+  // Alert states for Reception
+  const [callReceptionAlert, setCallReceptionAlert] = useState(false);
+  const [attendedReceptionAlert, setAttendedReceptionAlert] = useState(false);
+  const [timerReceptionExpiredAlert, setTimerReceptionExpiredAlert] = useState(false);
+  const [autoMarkReceptionAlert, setAutoMarkReceptionAlert] = useState(false);
+
+  // Shared alerts
   const [logoutAlert, setLogoutAlert] = useState(false);
-  const [timerExpiredAlert, setTimerExpiredAlert] = useState(false);
-  const [autoMarkAlert, setAutoMarkAlert] = useState(false);
 
   // Load persisted call state on mount
   useEffect(() => {
@@ -167,7 +72,7 @@ export default function DoctorHomeScreen() {
   // Save call state whenever it changes
   useEffect(() => {
     saveCallState();
-  }, [callStatus, callTime]);
+  }, [nurseCallStatus, nurseCallTime, receptionCallStatus, receptionCallTime]);
 
   // Handle app state changes (foreground/background)
   useEffect(() => {
@@ -188,25 +93,50 @@ export default function DoctorHomeScreen() {
 
   const loadPersistedCallState = async () => {
     try {
-      const savedStatus = await AsyncStorage.getItem('callStatus');
-      const savedCallTime = await AsyncStorage.getItem('callTime');
-      const savedCallId = await AsyncStorage.getItem('currentCallId');
+      const savedNurseStatus = await AsyncStorage.getItem('nurseCallStatus');
+      const savedNurseCallTime = await AsyncStorage.getItem('nurseCallTime');
+      const savedNurseCallId = await AsyncStorage.getItem('currentNurseCallId');
 
-      if (savedStatus === 'active' && savedCallTime) {
-        const startTime = new Date(savedCallTime);
+      if (savedNurseStatus === 'active' && savedNurseCallTime) {
+        const startTime = new Date(savedNurseCallTime);
         const now = new Date();
         const elapsedSeconds = Math.floor((now.getTime() - startTime.getTime()) / 1000);
         const remaining = 600 - elapsedSeconds;
 
-        setCallStatus('active');
-        setCallTime(startTime);
-        setRemainingSeconds(remaining);
+        setNurseCallStatus('active');
+        setNurseCallTime(startTime);
+        setNurseRemainingSeconds(remaining);
         
-        if (savedCallId) {
-          currentCallId.current = parseInt(savedCallId);
+        if (savedNurseCallId) {
+          currentNurseCallId.current = parseInt(savedNurseCallId);
         }
 
-        console.log('Restored call state:', {
+        console.log('Restored nurse call state:', {
+          startTime,
+          elapsedSeconds,
+          remaining
+        });
+      }
+
+      const savedReceptionStatus = await AsyncStorage.getItem('receptionCallStatus');
+      const savedReceptionCallTime = await AsyncStorage.getItem('receptionCallTime');
+      const savedReceptionCallId = await AsyncStorage.getItem('currentReceptionCallId');
+
+      if (savedReceptionStatus === 'active' && savedReceptionCallTime) {
+        const startTime = new Date(savedReceptionCallTime);
+        const now = new Date();
+        const elapsedSeconds = Math.floor((now.getTime() - startTime.getTime()) / 1000);
+        const remaining = 600 - elapsedSeconds;
+
+        setReceptionCallStatus('active');
+        setReceptionCallTime(startTime);
+        setReceptionRemainingSeconds(remaining);
+        
+        if (savedReceptionCallId) {
+          currentReceptionCallId.current = parseInt(savedReceptionCallId);
+        }
+
+        console.log('Restored reception call state:', {
           startTime,
           elapsedSeconds,
           remaining
@@ -219,16 +149,28 @@ export default function DoctorHomeScreen() {
 
   const saveCallState = async () => {
     try {
-      await AsyncStorage.setItem('callStatus', callStatus);
-      if (callTime) {
-        await AsyncStorage.setItem('callTime', callTime.toISOString());
+      await AsyncStorage.setItem('nurseCallStatus', nurseCallStatus);
+      if (nurseCallTime) {
+        await AsyncStorage.setItem('nurseCallTime', nurseCallTime.toISOString());
       } else {
-        await AsyncStorage.removeItem('callTime');
+        await AsyncStorage.removeItem('nurseCallTime');
       }
-      if (currentCallId.current) {
-        await AsyncStorage.setItem('currentCallId', String(currentCallId.current));
+      if (currentNurseCallId.current) {
+        await AsyncStorage.setItem('currentNurseCallId', String(currentNurseCallId.current));
       } else {
-        await AsyncStorage.removeItem('currentCallId');
+        await AsyncStorage.removeItem('currentNurseCallId');
+      }
+
+      await AsyncStorage.setItem('receptionCallStatus', receptionCallStatus);
+      if (receptionCallTime) {
+        await AsyncStorage.setItem('receptionCallTime', receptionCallTime.toISOString());
+      } else {
+        await AsyncStorage.removeItem('receptionCallTime');
+      }
+      if (currentReceptionCallId.current) {
+        await AsyncStorage.setItem('currentReceptionCallId', String(currentReceptionCallId.current));
+      } else {
+        await AsyncStorage.removeItem('currentReceptionCallId');
       }
     } catch (error) {
       console.error('Error saving call state:', error);
@@ -317,10 +259,12 @@ export default function DoctorHomeScreen() {
   };
 
   const handleCallNursePress = () => {
-    // Check if server is connected before showing confirmation
     if (!serverConnected) {
       setShowNetworkError(true);
       return;
+    }
+    if (nurseCallStatus === 'active') {
+      return; // Already have an active nurse call
     }
     setCallNurseAlert(true);
   };
@@ -329,7 +273,7 @@ export default function DoctorHomeScreen() {
     setCallNurseAlert(false);
     
     const callId = Date.now();
-    currentCallId.current = callId;
+    currentNurseCallId.current = callId;
     
     const sent = sendDoctorCall({
       doctorId: callId,
@@ -343,37 +287,88 @@ export default function DoctorHomeScreen() {
     }
     
     const startTime = new Date();
-    setCallStatus('active');
-    setCallTime(startTime);
-    setRemainingSeconds(600);
+    setNurseCallStatus('active');
+    setNurseCallTime(startTime);
+    setNurseRemainingSeconds(600);
     await playNotificationSound('success');
   };
 
-  const handleMarkAttendedPress = () => {
-    setAttendedAlert(true);
+  const handleMarkNurseAttendedPress = () => {
+    setAttendedNurseAlert(true);
   };
 
-  const handleConfirmAttended = async () => {
-    setAttendedAlert(false);
+  const handleConfirmNurseAttended = async () => {
+    setAttendedNurseAlert(false);
     
-    if (currentCallId.current) {
-      const completed = completeCall(currentCallId.current);
+    if (currentNurseCallId.current) {
+      const completed = completeCall(currentNurseCallId.current);
       if (!completed) {
         console.warn('Failed to complete call on server - not connected');
       }
-      currentCallId.current = null;
+      currentNurseCallId.current = null;
     }
     
-    setCallStatus('idle');
-    setCallTime(null);
-    setRemainingSeconds(600);
+    setNurseCallStatus('idle');
+    setNurseCallTime(null);
+    setNurseRemainingSeconds(600);
     
-    // Clear persisted state
-    await AsyncStorage.removeItem('callStatus');
-    await AsyncStorage.removeItem('callTime');
-    await AsyncStorage.removeItem('currentCallId');
+    await AsyncStorage.multiRemove(['nurseCallStatus', 'nurseCallTime', 'currentNurseCallId']);
     
     await playNotificationSound('success');
+  };
+
+  const handleCallNurseAgain = async () => {
+    setTimerNurseExpiredAlert(false);
+    
+    if (currentNurseCallId.current) {
+      completeCall(currentNurseCallId.current);
+    }
+    
+    const newCallId = Date.now();
+    currentNurseCallId.current = newCallId;
+    
+    sendDoctorCall({
+      doctorId: newCallId,
+      doctorName: doctorName,
+      room: doctorRoom.replace('Room ', ''),
+    });
+    
+    const newStartTime = new Date();
+    setNurseCallTime(newStartTime);
+    setNurseRemainingSeconds(600);
+    await playNotificationSound('info');
+  };
+
+  const handleDontCallNurseAgain = async () => {
+    setTimerNurseExpiredAlert(false);
+    
+    if (currentNurseCallId.current) {
+      completeCall(currentNurseCallId.current);
+      currentNurseCallId.current = null;
+    }
+    
+    setNurseCallStatus('idle');
+    setNurseCallTime(null);
+    setNurseRemainingSeconds(600);
+    
+    await AsyncStorage.multiRemove(['nurseCallStatus', 'nurseCallTime', 'currentNurseCallId']);
+    
+    await playNotificationSound('success');
+  };
+
+  const handleAutoMarkNurseOk = async () => {
+    setAutoMarkNurseAlert(false);
+    
+    if (currentNurseCallId.current) {
+      completeCall(currentNurseCallId.current);
+      currentNurseCallId.current = null;
+    }
+    
+    setNurseCallStatus('idle');
+    setNurseCallTime(null);
+    setNurseRemainingSeconds(600);
+    
+    await AsyncStorage.multiRemove(['nurseCallStatus', 'nurseCallTime', 'currentNurseCallId']);
   };
 
   const handleLogoutPress = () => {
@@ -398,135 +393,265 @@ export default function DoctorHomeScreen() {
     }
   };
 
-  const handleCallAgain = async () => {
-    setTimerExpiredAlert(false);
+  // ===== RECEPTION CALL HANDLERS =====
+
+  const handleCallReceptionPress = () => {
+    if (!serverConnected) {
+      setShowNetworkError(true);
+      return;
+    }
+    if (receptionCallStatus === 'active') {
+      return; // Already have an active reception call
+    }
+    setCallReceptionAlert(true);
+  };
+
+  const handleConfirmCallReception = async () => {
+    setCallReceptionAlert(false);
     
-    if (currentCallId.current) {
-      completeCall(currentCallId.current);
+    const callId = Date.now() + 1; // Add 1 to avoid collision with nurse call
+    currentReceptionCallId.current = callId;
+    
+    const sent = sendReceptionCall({
+      doctorId: callId,
+      doctorName: doctorName,
+      room: doctorRoom.replace('Room ', ''),
+    });
+    
+    if (!sent) {
+      console.warn('Failed to send call to server - not connected');
+      setShowNetworkError(true);
     }
     
-    const newCallId = Date.now();
-    currentCallId.current = newCallId;
+    const startTime = new Date();
+    setReceptionCallStatus('active');
+    setReceptionCallTime(startTime);
+    setReceptionRemainingSeconds(600);
+    await playNotificationSound('success');
+  };
+
+  const handleMarkReceptionAttendedPress = () => {
+    setAttendedReceptionAlert(true);
+  };
+
+  const handleConfirmReceptionAttended = async () => {
+    setAttendedReceptionAlert(false);
     
-    sendDoctorCall({
+    if (currentReceptionCallId.current) {
+      const completed = completeCall(currentReceptionCallId.current);
+      if (!completed) {
+        console.warn('Failed to complete call on server - not connected');
+      }
+      currentReceptionCallId.current = null;
+    }
+    
+    setReceptionCallStatus('idle');
+    setReceptionCallTime(null);
+    setReceptionRemainingSeconds(600);
+    
+    await AsyncStorage.multiRemove(['receptionCallStatus', 'receptionCallTime', 'currentReceptionCallId']);
+    
+    await playNotificationSound('success');
+  };
+
+  const handleCallReceptionAgain = async () => {
+    setTimerReceptionExpiredAlert(false);
+    
+    if (currentReceptionCallId.current) {
+      completeCall(currentReceptionCallId.current);
+    }
+    
+    const newCallId = Date.now() + 1;
+    currentReceptionCallId.current = newCallId;
+    
+    sendReceptionCall({
       doctorId: newCallId,
       doctorName: doctorName,
       room: doctorRoom.replace('Room ', ''),
     });
     
     const newStartTime = new Date();
-    setCallTime(newStartTime);
-    setRemainingSeconds(600);
+    setReceptionCallTime(newStartTime);
+    setReceptionRemainingSeconds(600);
     await playNotificationSound('info');
   };
 
-  const handleDontCallAgain = async () => {
-    setTimerExpiredAlert(false);
+  const handleDontCallReceptionAgain = async () => {
+    setTimerReceptionExpiredAlert(false);
     
-    if (currentCallId.current) {
-      completeCall(currentCallId.current);
-      currentCallId.current = null;
+    if (currentReceptionCallId.current) {
+      completeCall(currentReceptionCallId.current);
+      currentReceptionCallId.current = null;
     }
     
-    setCallStatus('idle');
-    setCallTime(null);
-    setRemainingSeconds(600);
+    setReceptionCallStatus('idle');
+    setReceptionCallTime(null);
+    setReceptionRemainingSeconds(600);
     
-    await AsyncStorage.removeItem('callStatus');
-    await AsyncStorage.removeItem('callTime');
-    await AsyncStorage.removeItem('currentCallId');
+    await AsyncStorage.multiRemove(['receptionCallStatus', 'receptionCallTime', 'currentReceptionCallId']);
     
     await playNotificationSound('success');
   };
 
-  const handleAutoMarkOk = async () => {
-    setAutoMarkAlert(false);
+  const handleAutoMarkReceptionOk = async () => {
+    setAutoMarkReceptionAlert(false);
     
-    if (currentCallId.current) {
-      completeCall(currentCallId.current);
-      currentCallId.current = null;
+    if (currentReceptionCallId.current) {
+      completeCall(currentReceptionCallId.current);
+      currentReceptionCallId.current = null;
     }
     
-    setCallStatus('idle');
-    setCallTime(null);
-    setRemainingSeconds(600);
+    setReceptionCallStatus('idle');
+    setReceptionCallTime(null);
+    setReceptionRemainingSeconds(600);
     
-    await AsyncStorage.removeItem('callStatus');
-    await AsyncStorage.removeItem('callTime');
-    await AsyncStorage.removeItem('currentCallId');
+    await AsyncStorage.multiRemove(['receptionCallStatus', 'receptionCallTime', 'currentReceptionCallId']);
   };
 
   const handleNetworkErrorOk = () => {
     setShowNetworkError(false);
   };
 
-  const getFormattedTime = () => {
-    const absSeconds = Math.abs(remainingSeconds);
+  const getFormattedTime = (seconds: number) => {
+    const absSeconds = Math.abs(seconds);
     const minutes = Math.floor(absSeconds / 60);
-    const seconds = absSeconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    const secs = absSeconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Main timer effect - updates every second
+  const getTimerColor = (seconds: number) => {
+    if (seconds <= 0) return '#DC2626';
+    if (seconds <= 120) return '#F59E0B';
+    return '#0066CC';
+  };
+
+  // ===== NURSE CALL TIMERS =====
+
+  // Nurse main timer effect - updates every second
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     
-    if (callStatus === 'active' && callTime) {
+    if (nurseCallStatus === 'active' && nurseCallTime) {
       interval = setInterval(() => {
         const now = new Date();
-        const elapsedSeconds = Math.floor((now.getTime() - callTime.getTime()) / 1000);
-        const remaining = 600 - elapsedSeconds;
-        setRemainingSeconds(remaining);
+        const elapsedSeconds = Math.floor((now.getTime() - nurseCallTime.getTime()) / 1000);
+        const remaining = Math.max(0, 600 - elapsedSeconds); // Stop at 0, don't go negative
+        setNurseRemainingSeconds(remaining);
       }, 1000);
     }
 
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [callStatus, callTime]);
+  }, [nurseCallStatus, nurseCallTime]);
 
-  // Check for 2 minute warning
+  // Check for 2 minute warning (nurse)
   useEffect(() => {
-    if (callStatus === 'active' && remainingSeconds === 120) {
+    if (nurseCallStatus === 'active' && nurseRemainingSeconds === 120) {
       playNotificationSound('info');
     }
-  }, [remainingSeconds, callStatus]);
+  }, [nurseRemainingSeconds, nurseCallStatus]);
 
-  // Check for 10 minute mark (timer expired)
+  // Check for 10 minute mark (nurse timer expired)
   useEffect(() => {
-    if (callStatus === 'active' && remainingSeconds === 0) {
-      setTimerExpiredAlert(true);
+    if (nurseCallStatus === 'active' && nurseRemainingSeconds === 0) {
+      setTimerNurseExpiredAlert(true);
       playNotificationSound('warning');
     }
-  }, [remainingSeconds, callStatus]);
+  }, [nurseRemainingSeconds, nurseCallStatus]);
 
-  // Check for 20 minute mark (auto mark attended)
+  // Check for auto mark attended after 10 minutes (nurse) - if user doesn't respond after timer expires
   useEffect(() => {
-    if (callStatus === 'active' && remainingSeconds === -600) {
-      setAutoMarkAlert(true);
-      playNotificationSound('warning');
-      
-      if (currentCallId.current) {
-        completeCall(currentCallId.current);
-        currentCallId.current = null;
-      }
-      
-      setTimeout(async () => {
-        setCallStatus('idle');
-        setCallTime(null);
-        setRemainingSeconds(600);
-        await AsyncStorage.removeItem('callStatus');
-        await AsyncStorage.removeItem('callTime');
-        await AsyncStorage.removeItem('currentCallId');
-      }, 3000);
+    let timeoutId: ReturnType<typeof setTimeout>;
+    
+    if (nurseCallStatus === 'active' && nurseCallTime && nurseRemainingSeconds === 0) {
+      // Set timeout for 10 minutes after the timer reached 0
+      timeoutId = setTimeout(async () => {
+        setAutoMarkNurseAlert(true);
+        playNotificationSound('warning');
+        
+        if (currentNurseCallId.current) {
+          completeCall(currentNurseCallId.current);
+          currentNurseCallId.current = null;
+        }
+        
+        setTimeout(async () => {
+          setNurseCallStatus('idle');
+          setNurseCallTime(null);
+          setNurseRemainingSeconds(600);
+          await AsyncStorage.multiRemove(['nurseCallStatus', 'nurseCallTime', 'currentNurseCallId']);
+        }, 3000);
+      }, 600000); // Wait 10 more minutes after timer expires
     }
-  }, [remainingSeconds, callStatus]);
+    
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [nurseRemainingSeconds, nurseCallStatus, nurseCallTime]);
 
-  const getTimerColor = () => {
-    if (remainingSeconds <= 0) return '#DC2626';
-    if (remainingSeconds <= 120) return '#F59E0B';
-    return '#0066CC';
-  };
+  // ===== RECEPTION CALL TIMERS =====
+
+  // Reception main timer effect - updates every second
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    
+    if (receptionCallStatus === 'active' && receptionCallTime) {
+      interval = setInterval(() => {
+        const now = new Date();
+        const elapsedSeconds = Math.floor((now.getTime() - receptionCallTime.getTime()) / 1000);
+        const remaining = Math.max(0, 600 - elapsedSeconds); // Stop at 0, don't go negative
+        setReceptionRemainingSeconds(remaining);
+      }, 1000);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [receptionCallStatus, receptionCallTime]);
+
+  // Check for 2 minute warning (reception)
+  useEffect(() => {
+    if (receptionCallStatus === 'active' && receptionRemainingSeconds === 120) {
+      playNotificationSound('info');
+    }
+  }, [receptionRemainingSeconds, receptionCallStatus]);
+
+  // Check for 10 minute mark (reception timer expired)
+  useEffect(() => {
+    if (receptionCallStatus === 'active' && receptionRemainingSeconds === 0) {
+      setTimerReceptionExpiredAlert(true);
+      playNotificationSound('warning');
+    }
+  }, [receptionRemainingSeconds, receptionCallStatus]);
+
+  // Check for auto mark attended after 10 minutes (reception) - if user doesn't respond after timer expires
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout>;
+    
+    if (receptionCallStatus === 'active' && receptionCallTime && receptionRemainingSeconds === 0) {
+      // Set timeout for 10 minutes after the timer reached 0
+      timeoutId = setTimeout(async () => {
+        setAutoMarkReceptionAlert(true);
+        playNotificationSound('warning');
+        
+        if (currentReceptionCallId.current) {
+          completeCall(currentReceptionCallId.current);
+          currentReceptionCallId.current = null;
+        }
+        
+        setTimeout(async () => {
+          setReceptionCallStatus('idle');
+          setReceptionCallTime(null);
+          setReceptionRemainingSeconds(600);
+          await AsyncStorage.multiRemove(['receptionCallStatus', 'receptionCallTime', 'currentReceptionCallId']);
+        }, 3000);
+      }, 600000); // Wait 10 more minutes after timer expires
+    }
+    
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [receptionRemainingSeconds, receptionCallStatus, receptionCallTime]);
 
   return (
     <View style={styles.container}>
@@ -534,7 +659,10 @@ export default function DoctorHomeScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <View>
+        <TouchableOpacity
+          onPress={() => router.push('/(doctor)/profile')}
+          activeOpacity={0.7}
+        >
           <Text style={styles.doctorName}>{doctorName}</Text>
           <View style={styles.roomAndStatusRow}>
             <Text style={styles.roomNumber}>{doctorRoom}</Text>
@@ -545,7 +673,7 @@ export default function DoctorHomeScreen() {
               </Text>
             </View>
           </View>
-        </View>
+        </TouchableOpacity>
         <View style={styles.headerActions}>
           <TouchableOpacity
             style={styles.soundButton}
@@ -568,89 +696,171 @@ export default function DoctorHomeScreen() {
       </View>
 
       {/* Main Content */}
-      <View style={styles.content}>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Status Display */}
         <View style={styles.statusCard}>
-          <Text style={styles.statusLabel}>Current Status</Text>
-          <View
-            style={[
-              styles.statusBadge,
-              callStatus === 'active' && styles.statusBadgeActive,
-            ]}
-          >
+          <View style={styles.statusBadgesContainer}>
             <View
               style={[
-                styles.statusDot,
-                callStatus === 'active' && styles.statusDotActive,
-              ]}
-            />
-            <Text
-              style={[
-                styles.statusText,
-                callStatus === 'active' && styles.statusTextActive,
+                styles.statusBadge,
+                nurseCallStatus === 'active' && styles.statusBadgeActive,
               ]}
             >
-              {callStatus === 'idle' ? 'No Active Calls' : 'Nurse Called'}
-            </Text>
-          </View>
+              <View
+                style={[
+                  styles.statusDot,
+                  nurseCallStatus === 'active' && styles.statusDotActive,
+                ]}
+              />
+              <View style={styles.statusBadgeContent}>
+                <Text style={styles.statusBadgeLabel}>Nurse</Text>
+                <Text
+                  style={[
+                    styles.statusText,
+                    nurseCallStatus === 'active' && styles.statusTextActive,
+                  ]}
+                >
+                  {nurseCallStatus === 'idle' ? 'No Call' : 'Called'}
+                </Text>
+              </View>
+            </View>
 
-          {callStatus === 'active' && (
+            <View
+              style={[
+                styles.statusBadge,
+                receptionCallStatus === 'active' && styles.statusBadgeActiveReception,
+              ]}
+            >
+              <View
+                style={[
+                  styles.statusDot,
+                  receptionCallStatus === 'active' && styles.statusDotActiveReception,
+                ]}
+              />
+              <View style={styles.statusBadgeContent}>
+                <Text style={styles.statusBadgeLabel}>Reception</Text>
+                <Text
+                  style={[
+                    styles.statusText,
+                    receptionCallStatus === 'active' && styles.statusTextActiveReception,
+                  ]}
+                >
+                  {receptionCallStatus === 'idle' ? 'No Call' : 'Called'}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* Nurse Call Section */}
+        <View style={styles.callSection}>
+          <Text style={styles.callSectionTitle}>📞 Nurse Call</Text>
+          
+          {nurseCallStatus === 'active' && (
             <View style={styles.timerContainer}>
               <Text style={styles.timerLabel}>
-                {remainingSeconds > 0 ? 'Time Remaining' : 'Time Exceeded'}
+                {nurseRemainingSeconds > 0 ? 'Time Remaining' : 'Time Exceeded'}
               </Text>
-              <Text style={[styles.timerText, { color: getTimerColor() }]}>
-                {remainingSeconds >= 0 ? getFormattedTime() : `-${getFormattedTime()}`}
+              <Text style={[styles.timerText, { color: getTimerColor(nurseRemainingSeconds) }]}>
+                {nurseRemainingSeconds >= 0 ? getFormattedTime(nurseRemainingSeconds) : `-${getFormattedTime(nurseRemainingSeconds)}`}
               </Text>
-              {remainingSeconds <= 120 && remainingSeconds > 0 && (
+              {nurseRemainingSeconds <= 120 && nurseRemainingSeconds > 0 && (
                 <Text style={styles.warningText}>⏰ Nurse should arrive soon</Text>
               )}
-              {remainingSeconds <= 0 && (
+              {nurseRemainingSeconds <= 0 && (
                 <Text style={styles.expiredText}>
                   ⚠️ Expected time has passed
                 </Text>
               )}
             </View>
           )}
-        </View>
 
-        {/* Call Button or Attended Button */}
-        {callStatus === 'idle' ? (
-          <TouchableOpacity
-            style={styles.callButton}
-            onPress={handleCallNursePress}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.callButtonText}>Call Nurse</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.activeCallContainer}>
-            <View style={styles.waitingIndicator}>
-              <Text style={styles.waitingText}>
-                {remainingSeconds > 0
-                  ? '🏥 Waiting for nurse...'
-                  : '⏱️ Taking longer than expected'}
-              </Text>
-            </View>
+          {nurseCallStatus === 'idle' ? (
             <TouchableOpacity
-              style={styles.attendedButton}
-              onPress={handleMarkAttendedPress}
+              style={styles.callButton}
+              onPress={handleCallNursePress}
               activeOpacity={0.8}
             >
-              <Text style={styles.attendedButtonText}>Mark as Attended</Text>
+              <Text style={styles.callButtonText}>Call Nurse</Text>
             </TouchableOpacity>
-          </View>
-        )}
+          ) : (
+            <View style={styles.activeCallContainer}>
+              <View style={styles.waitingIndicator}>
+                <Text style={styles.waitingText}>
+                  {nurseRemainingSeconds > 0
+                    ? '🏥 Waiting for nurse...'
+                    : '⏱️ Taking longer than expected'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.attendedButton}
+                onPress={handleMarkNurseAttendedPress}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.attendedButtonText}>Mark as Attended</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {/* Reception Call Section */}
+        <View style={styles.callSection}>
+          <Text style={styles.callSectionTitle}>🏢 Reception Call</Text>
+          
+          {receptionCallStatus === 'active' && (
+            <View style={styles.timerContainer}>
+              <Text style={styles.timerLabel}>
+                {receptionRemainingSeconds > 0 ? 'Time Remaining' : 'Time Exceeded'}
+              </Text>
+              <Text style={[styles.timerText, { color: getTimerColor(receptionRemainingSeconds) }]}>
+                {receptionRemainingSeconds >= 0 ? getFormattedTime(receptionRemainingSeconds) : `-${getFormattedTime(receptionRemainingSeconds)}`}
+              </Text>
+              {receptionRemainingSeconds <= 120 && receptionRemainingSeconds > 0 && (
+                <Text style={styles.warningText}>⏰ Reception should arrive soon</Text>
+              )}
+              {receptionRemainingSeconds <= 0 && (
+                <Text style={styles.expiredText}>
+                  ⚠️ Expected time has passed
+                </Text>
+              )}
+            </View>
+          )}
+
+          {receptionCallStatus === 'idle' ? (
+            <TouchableOpacity
+              style={[styles.callButton, styles.callButtonReception]}
+              onPress={handleCallReceptionPress}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.callButtonText}>Call Reception</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.activeCallContainer}>
+              <View style={styles.waitingIndicator}>
+                <Text style={styles.waitingText}>
+                  {receptionRemainingSeconds > 0
+                    ? '🏢 Waiting for reception...'
+                    : '⏱️ Taking longer than expected'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.attendedButton, styles.attendedButtonReception]}
+                onPress={handleMarkReceptionAttendedPress}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.attendedButtonText}>Mark as Attended</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
 
         {/* Info Text */}
         <Text style={styles.infoText}>
-          {callStatus === 'idle'
-            ? 'Press the button above to call a nurse to your room'
-            : 'A nurse will arrive shortly. Press "Mark as Attended" when done'}
+          Press the buttons above to call Nurse or Reception to your room
         </Text>
-      </View>
+      </ScrollView>
 
-      {/* Custom Alerts */}
+      {/* ===== NURSE CALL ALERTS ===== */}
       <CustomAlert
         visible={callNurseAlert}
         title="Call Nurse"
@@ -663,39 +873,86 @@ export default function DoctorHomeScreen() {
       />
 
       <CustomAlert
-        visible={attendedAlert}
+        visible={attendedNurseAlert}
         title="Mark as Attended"
         message="Confirm that the nurse has attended to your call?"
         type="success"
         confirmText="Yes, Attended"
         cancelText="Not Yet"
-        onConfirm={handleConfirmAttended}
-        onCancel={() => setAttendedAlert(false)}
+        onConfirm={handleConfirmNurseAttended}
+        onCancel={() => setAttendedNurseAlert(false)}
       />
 
       <CustomAlert
-        visible={timerExpiredAlert}
+        visible={timerNurseExpiredAlert}
         title="Expected Time Reached"
         message="The expected 10-minute wait time has passed. Would you like to call the nurse again or mark as attended?"
         type="info"
         confirmText="Call Again"
         cancelText="Mark Attended"
-        onConfirm={handleCallAgain}
-        onCancel={handleDontCallAgain}
+        onConfirm={handleCallNurseAgain}
+        onCancel={handleDontCallNurseAgain}
       />
 
       <CustomAlert
-        visible={autoMarkAlert}
+        visible={autoMarkNurseAlert}
         title="Auto-Marked as Attended"
-        message="The call has been active for 20 minutes and has been automatically marked as attended."
+        message="The nurse call has been active for 20 minutes and has been automatically marked as attended."
         type="info"
         confirmText="OK"
         cancelText=""
         singleButton={true}
-        onConfirm={handleAutoMarkOk}
-        onCancel={handleAutoMarkOk}
+        onConfirm={handleAutoMarkNurseOk}
+        onCancel={handleAutoMarkNurseOk}
       />
 
+      {/* ===== RECEPTION CALL ALERTS ===== */}
+      <CustomAlert
+        visible={callReceptionAlert}
+        title="Call Reception"
+        message="Are you sure you want to call reception to your room?"
+        type="confirm"
+        confirmText="Yes, Call"
+        cancelText="Cancel"
+        onConfirm={handleConfirmCallReception}
+        onCancel={() => setCallReceptionAlert(false)}
+      />
+
+      <CustomAlert
+        visible={attendedReceptionAlert}
+        title="Mark as Attended"
+        message="Confirm that reception has attended to your call?"
+        type="success"
+        confirmText="Yes, Attended"
+        cancelText="Not Yet"
+        onConfirm={handleConfirmReceptionAttended}
+        onCancel={() => setAttendedReceptionAlert(false)}
+      />
+
+      <CustomAlert
+        visible={timerReceptionExpiredAlert}
+        title="Expected Time Reached"
+        message="The expected 10-minute wait time has passed. Would you like to call reception again or mark as attended?"
+        type="info"
+        confirmText="Call Again"
+        cancelText="Mark Attended"
+        onConfirm={handleCallReceptionAgain}
+        onCancel={handleDontCallReceptionAgain}
+      />
+
+      <CustomAlert
+        visible={autoMarkReceptionAlert}
+        title="Auto-Marked as Attended"
+        message="The reception call has been active for 20 minutes and has been automatically marked as attended."
+        type="info"
+        confirmText="OK"
+        cancelText=""
+        singleButton={true}
+        onConfirm={handleAutoMarkReceptionOk}
+        onCancel={handleAutoMarkReceptionOk}
+      />
+
+      {/* Shared Alerts */}
       <CustomAlert
         visible={showNetworkError}
         title="Connection Error"
@@ -812,47 +1069,56 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 32,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 20,
   },
   statusCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    padding: 24,
-    marginBottom: 32,
+    padding: 12,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: '#E5E5E5',
   },
-  statusLabel: {
-    fontSize: 14,
-    color: '#666666',
-    marginBottom: 12,
-    fontWeight: '500',
+  statusBadgesContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
   },
   statusBadge: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
     backgroundColor: '#F3F4F6',
   },
   statusBadgeActive: {
     backgroundColor: '#FEF3C7',
   },
+  statusBadgeContent: {
+    marginLeft: 8,
+    flex: 1,
+  },
+  statusBadgeLabel: {
+    fontSize: 11,
+    color: '#666666',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
   statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: '#6B7280',
-    marginRight: 8,
   },
   statusDotActive: {
     backgroundColor: '#F59E0B',
   },
   statusText: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '600',
     color: '#374151',
   },
@@ -860,22 +1126,22 @@ const styles = StyleSheet.create({
     color: '#92400E',
   },
   timerContainer: {
-    marginTop: 20,
-    paddingTop: 20,
+    marginTop: 12,
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#E5E5E5',
     alignItems: 'center',
   },
   timerLabel: {
-    fontSize: 14,
+    fontSize: 12,
     color: '#666666',
-    marginBottom: 8,
+    marginBottom: 6,
     fontWeight: '500',
   },
   timerText: {
-    fontSize: 48,
+    fontSize: 36,
     fontWeight: '700',
-    letterSpacing: 2,
+    letterSpacing: 1,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   warningText: {
@@ -892,50 +1158,50 @@ const styles = StyleSheet.create({
   },
   callButton: {
     backgroundColor: '#0066CC',
-    paddingVertical: 20,
-    borderRadius: 12,
+    paddingVertical: 16,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24,
-    minHeight: 64,
+    marginBottom: 10,
+    minHeight: 52,
   },
   callButtonText: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   activeCallContainer: {
-    marginBottom: 24,
+    marginBottom: 10,
   },
   waitingIndicator: {
     backgroundColor: '#FEF3C7',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    marginBottom: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: '#FCD34D',
   },
   waitingText: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '500',
     color: '#92400E',
     textAlign: 'center',
   },
   attendedButton: {
     backgroundColor: '#059669',
-    paddingVertical: 20,
-    borderRadius: 12,
+    paddingVertical: 16,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 64,
+    minHeight: 52,
   },
   attendedButtonText: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   infoText: {
     fontSize: 14,
@@ -943,84 +1209,33 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
+  statusBadgeActiveReception: {
+    backgroundColor: '#FED7AA',
   },
-  alertContainer: {
+  statusDotActiveReception: {
+    backgroundColor: '#EA8C55',
+  },
+  statusTextActiveReception: {
+    color: '#92400E',
+  },
+  callSection: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 28,
-    width: '100%',
-    maxWidth: 400,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 10,
-  },
-  iconContainer: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  iconText: {
-    fontSize: 36,
-  },
-  alertTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1A1A1A',
+    borderRadius: 12,
+    padding: 14,
     marginBottom: 12,
-    textAlign: 'center',
-    letterSpacing: 0.3,
-  },
-  alertMessage: {
-    fontSize: 16,
-    color: '#666666',
-    textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 28,
-  },
-  buttonContainer: {
-    flexDirection: 'row',
-    width: '100%',
-    gap: 12,
-  },
-  alertButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 52,
-  },
-  cancelButton: {
-    backgroundColor: '#F3F4F6',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#E5E5E5',
   },
-  confirmButton: {
-    backgroundColor: '#0066CC',
-  },
-  cancelButtonText: {
-    fontSize: 16,
+  callSectionTitle: {
+    fontSize: 14,
     fontWeight: '600',
-    color: '#374151',
+    color: '#1A1A1A',
+    marginBottom: 10,
   },
-  confirmButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
+  callButtonReception: {
+    backgroundColor: '#E8750F',
+  },
+  attendedButtonReception: {
+    backgroundColor: '#059669',
   },
 });

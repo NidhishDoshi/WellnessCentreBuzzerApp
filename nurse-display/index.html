@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wellness Centre - Nurse Display</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- TEST BUTTON - Remove in production -->
+    <button id="testButton" style="position: fixed; top: 10px; right: 10px; z-index: 10000; padding: 10px 20px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
+        🧪 Add Test Call
+    </button>
+
+    <!-- Audio Status Indicator -->
+    <div id="audioStatus" style="position: fixed; top: 60px; right: 10px; z-index: 10000; padding: 10px 15px; background: #ff6b6b; color: white; border-radius: 5px; font-size: 12px; font-weight: bold;">
+        🔕 Audio Not Ready
+    </div>
+
+    <div class="container">
+        <!-- Image Carousel (shown when no active calls) -->
+        <div id="carousel-container" class="carousel-container active">
+            <div class="carousel-slide">
+                <img src="https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=1920&h=1080&fit=crop" alt="Wellness Centre" class="carousel-image active">
+                <img src="https://images.unsplash.com/photo-1538108149393-fbbd81895907?w=1920&h=1080&fit=crop" alt="Healthcare" class="carousel-image">
+                <img src="https://images.unsplash.com/photo-1505751172876-fa1923c5c528?w=1920&h=1080&fit=crop" alt="Medical Care" class="carousel-image">
+                <img src="https://images.unsplash.com/photo-1551076805-e1869033e561?w=1920&h=1080&fit=crop" alt="Wellness" class="carousel-image">
+                <img src="https://images.unsplash.com/photo-1504439468489-c8920d796a29?w=1920&h=1080&fit=crop" alt="Healthcare Team" class="carousel-image">
+            </div>
+            <div class="carousel-overlay">
+                <h1>🏥 Wellness Centre</h1>
+                <p>Your Health, Our Priority</p>
+                <div class="carousel-status">
+                    <div id="carousel-connection-status" class="status-indicator">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Disconnected</span>
+                    </div>
+                    <div class="datetime" id="carousel-datetime"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Doctor Cards Display (shown when there are active calls) -->
+        <div id="cards-container" class="cards-container">
+            <header class="header">
+                <h1>🏥 Wellness Centre - Nurse Station Display</h1>
+                <div class="header-info">
+                    <div id="connection-status" class="status disconnected">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Disconnected</span>
+                    </div>
+                    <div class="datetime" id="datetime"></div>
+                </div>
+            </header>
+
+            <main class="main-content">
+                <div id="calls-grid" class="calls-grid">
+                    <!-- Doctor cards will be dynamically inserted here -->
+                </div>
+            </main>
+
+            <footer class="footer">
+                <p>Nurse Station Display - Always On</p>
+            </footer>
+        </div>
+    </div>
+
+    <!-- Audio for notification -->
+    <audio id="notification-sound" preload="auto" crossorigin="anonymous" controls style="display: none;">
+        <source src="notification.wav" type="audio/wav">
+        <source src="notification.mp3" type="audio/mpeg">
+        Your browser does not support the audio element.
+    </audio>
+
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

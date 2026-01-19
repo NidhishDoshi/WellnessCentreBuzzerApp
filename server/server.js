@@ -82,25 +82,45 @@ io.on('connection', (socket) => {
   // Send current active calls to newly connected client
   socket.emit('activeCalls', activeCalls);
   
-  // Handle doctor call
+  // Handle nurse call
   socket.on('doctorCall', (data) => {
-    console.log('Doctor call received:', data);
+    console.log('Nurse call received:', data);
     
-    // Use the doctorId from the app as the call ID for consistency
-    // This ensures the app can complete the same call it created
     const call = {
       id: data.doctorId || Date.now(),
       doctorId: data.doctorId,
       doctorName: data.doctorName,
       room: data.room || 'Unknown',
       timestamp: new Date(),
-      status: 'active'
+      status: 'active',
+      type: 'nurse'
     };
     
     activeCalls.push(call);
     
-    // Broadcast to all connected clients (TV displays and mobile apps)
-    io.emit('newCall', call);
+    // Broadcast to all connected clients
+    io.emit('newNurseCall', call);
+    io.emit('activeCalls', activeCalls);
+  });
+  
+  // Handle reception call
+  socket.on('receptionCall', (data) => {
+    console.log('Reception call received:', data);
+    
+    const call = {
+      id: data.doctorId || Date.now(),
+      doctorId: data.doctorId,
+      doctorName: data.doctorName,
+      room: data.room || 'Unknown',
+      timestamp: new Date(),
+      status: 'active',
+      type: 'reception'
+    };
+    
+    activeCalls.push(call);
+    
+    // Broadcast to all connected clients
+    io.emit('newReceptionCall', call);
     io.emit('activeCalls', activeCalls);
   });
   

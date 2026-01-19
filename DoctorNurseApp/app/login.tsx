@@ -13,15 +13,25 @@ import {
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
+import { CustomAlert } from '../components/CustomAlert';
 
 const GOOGLE_SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbzBQLrPT7d7RySISRrxWC_wZfdDEWFDwcIKb39lyHuPCxlmfgGULfeSUmld8Wz2xvXn/exec';
-
 export default function LoginScreen() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [showAlert, setShowAlert] = useState(false);
+  const [alertData, setAlertData] = useState<{
+    type: 'success' | 'error' | 'warning' | 'info';
+    title: string;
+    message: string;
+  }>({
+    type: 'error',
+    title: '',
+    message: '',
+  });
 
   // Check for existing session on mount
   useEffect(() => {
@@ -62,7 +72,7 @@ export default function LoginScreen() {
     setError('');
 
     if (phoneNumber.length !== 10) {
-      setError('Phone number must be 10 digits');
+      setError('Invalid number');
       return;
     }
 
@@ -234,6 +244,18 @@ export default function LoginScreen() {
           Authorized medical personnel only
         </Text>
       </ScrollView>
+
+      {/* Custom Alert */}
+      <CustomAlert
+        visible={showAlert}
+        title={alertData.title}
+        message={alertData.message}
+        type={alertData.type}
+        confirmText="OK"
+        onConfirm={() => setShowAlert(false)}
+        onCancel={() => setShowAlert(false)}
+        singleButton={true}
+      />
     </KeyboardAvoidingView>
   );
 }

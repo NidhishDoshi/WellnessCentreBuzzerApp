@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wellness Centre - TV Display</title>
+    <title>Wellness Centre - Reception Display</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -11,6 +11,11 @@
     <button id="testButton" style="position: fixed; top: 10px; right: 10px; z-index: 10000; padding: 10px 20px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
         🧪 Add Test Call
     </button>
+
+    <!-- Audio Status Indicator -->
+    <div id="audioStatus" style="position: fixed; top: 60px; right: 10px; z-index: 10000; padding: 10px 15px; background: #ff6b6b; color: white; border-radius: 5px; font-size: 12px; font-weight: bold;">
+        🔕 Audio Not Ready
+    </div>
 
     <div class="container">
         <!-- Image Carousel (shown when no active calls) -->
@@ -38,7 +43,7 @@
         <!-- Doctor Cards Display (shown when there are active calls) -->
         <div id="cards-container" class="cards-container">
             <header class="header">
-                <h1>🏥 Wellness Centre - Nurse Station</h1>
+                <h1>� Wellness Centre - Reception Desk Display</h1>
                 <div class="header-info">
                     <div id="connection-status" class="status disconnected">
                         <span class="status-dot"></span>
@@ -55,14 +60,16 @@
             </main>
 
             <footer class="footer">
-                <p>Nurse Station Display - Always On</p>
+                <p>Reception Desk Display - Always On</p>
             </footer>
         </div>
     </div>
 
     <!-- Audio for notification -->
-    <audio id="notification-sound" preload="auto">
+    <audio id="notification-sound" preload="auto" crossorigin="anonymous" controls style="display: none;">
+        <source src="notification.wav" type="audio/wav">
         <source src="notification.mp3" type="audio/mpeg">
+        Your browser does not support the audio element.
     </audio>
 
     <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
