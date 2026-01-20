@@ -354,18 +354,6 @@ function playNotificationSound() {
         playBeepWithWebAudio();
     }
 }
-                .catch(error => {
-                    console.error('❌ HTML5 audio error:', error.name, error.message);
-                    console.log('🔊 Falling back to Web Audio API...');
-                    playBeepWithWebAudio();
-                });
-        }
-    } catch (error) {
-        console.error('❌ Exception in playNotificationSound:', error);
-        // Last resort: try Web Audio API
-        playBeepWithWebAudio();
-    }
-}
 
 // Web Audio API - generates a beep sound (no browser restrictions)
 function playBeepWithWebAudio() {
