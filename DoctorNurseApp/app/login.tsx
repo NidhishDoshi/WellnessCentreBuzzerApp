@@ -13,25 +13,21 @@ import {
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
-import { CustomAlert } from '../components/CustomAlert';
 
 const GOOGLE_SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbzBQLrPT7d7RySISRrxWC_wZfdDEWFDwcIKb39lyHuPCxlmfgGULfeSUmld8Wz2xvXn/exec';
+
 export default function LoginScreen() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [pin, setPin] = useState('');
+  const [email, setEmail] = useState('');
+  const [doctorName, setDoctorName] = useState('');
+  const [roomNumber, setRoomNumber] = useState('');
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
-  const [showAlert, setShowAlert] = useState(false);
-  const [alertData, setAlertData] = useState<{
-    type: 'success' | 'error' | 'warning' | 'info';
-    title: string;
-    message: string;
-  }>({
-    type: 'error',
-    title: '',
-    message: '',
-  });
+  const [isSignup, setIsSignup] = useState(false);
+  const [isForgotPasswordMode, setIsForgotPasswordMode] = useState(false);
 
   // Check for existing session on mount
   useEffect(() => {
@@ -48,10 +44,8 @@ export default function LoginScreen() {
       // If all required data exists, auto-login
       if (loggedIn === 'true' && savedPhone && savedName && savedRoom) {
         console.log('✅ Auto-login: Session found for', savedName);
-        // Navigate directly to home
         router.replace('/(doctor)/home');
       } else {
-        // No valid session, show login form
         setIsCheckingAuth(false);
       }
     } catch (error) {
@@ -68,11 +62,16 @@ export default function LoginScreen() {
     return hash;
   };
 
+  const validateEmail = (value: string) => {
+    return /^\S+@\S+\.\S+$/.test(value);
+  };
+
   const handleLogin = async () => {
     setError('');
+    setSuccessMessage('');
 
     if (phoneNumber.length !== 10) {
-      setError('Invalid number');
+      setError('Phone number must be 10 digits');
       return;
     }
 
@@ -99,7 +98,6 @@ export default function LoginScreen() {
       const data = await response.json();
 
       if (data.success) {
-        // Store all login data as strings
         await AsyncStorage.multiSet([
           ['doctorLoggedIn', 'true'],
           ['doctorPhone', String(phoneNumber)],
@@ -109,8 +107,6 @@ export default function LoginScreen() {
         ]);
 
         console.log('✅ Login successful:', data.doctorName);
-
-        // Navigate to home
         router.replace('/(doctor)/home');
       } else {
         setError(data.message || 'Invalid phone number or PIN');
@@ -120,6 +116,122 @@ export default function LoginScreen() {
     } catch (err) {
       console.error('Login error:', err);
       setError('Connection failed. Please check your internet and try again.');
+      setIsLoading(false);
+    }
+  };
+
+  const handleSignup = async () => {
+    setError('');
+    setSuccessMessage('');
+
+    if (phoneNumber.length !== 10) {
+      setError('Phone number must be 10 digits');
+      return;
+    }
+
+    if (pin.length !== 4) {
+      setError('PIN must be 4 digits');
+      return;
+    }
+
+    if (!doctorName.trim()) {
+      setError('Please enter your name');
+      return;
+    }
+
+    if (!roomNumber.trim()) {
+      setError('Please enter room number');
+      return;
+    }
+
+    if (!validateEmail(email)) {
+      setError('Please enter a valid email');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const hashedPIN = await hashPIN(pin);
+
+      const requestBody = {
+        action: 'register',
+        phone: phoneNumber,
+        pinHash: hashedPIN,
+        doctorName: doctorName.trim(),
+        roomNumber: roomNumber.trim(),
+        email: email.trim()
+      };
+
+      console.log('Signup request:', requestBody);
+
+      const response = await fetch(GOOGLE_SHEETS_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      const data = await response.json();
+      console.log('Signup response:', data);
+
+      if (data.success) {
+        await AsyncStorage.multiSet([
+          ['doctorLoggedIn', 'true'],
+          ['doctorPhone', String(phoneNumber)],
+          ['doctorName', String(doctorName.trim())],
+          ['doctorRoom', String(roomNumber.trim())],
+          ['doctorEmail', String(email.trim())],
+          ['loginTimestamp', new Date().toISOString()],
+        ]);
+
+        console.log('✅ Signup successful:', doctorName);
+        router.replace('/(doctor)/home');
+      } else {
+        setError(data.message || 'Signup failed');
+        setIsLoading(false);
+        setPin('');
+      }
+    } catch (err) {
+      console.error('Signup error:', err);
+      setError('Connection failed. Please check your internet and try again.');
+      setIsLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    setError('');
+    setSuccessMessage('');
+
+    if (!validateEmail(email)) {
+      setError('Please enter a valid email to reset');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetch(
+        `${GOOGLE_SHEETS_API_URL}?action=forgotPassword&email=${encodeURIComponent(
+          email
+        )}`,
+        {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+      const data = await response.json();
+
+      if (data.success) {
+        setSuccessMessage(data.message || 'Password reset instructions sent');
+        setIsForgotPasswordMode(false);
+      } else {
+        setError(data.message || 'Could not process request');
+      }
+    } catch (err) {
+      console.error('Forgot password error:', err);
+      setError('Connection failed. Please check your internet and try again.');
+    } finally {
       setIsLoading(false);
     }
   };
@@ -141,6 +253,12 @@ export default function LoginScreen() {
   };
 
   const isFormValid = phoneNumber.length === 10 && pin.length === 4;
+  const isSignupFormValid = 
+    phoneNumber.length === 10 && 
+    pin.length === 4 && 
+    doctorName.trim().length > 0 &&
+    roomNumber.trim().length > 0 &&
+    validateEmail(email);
 
   // Show loading screen while checking for existing session
   if (isCheckingAuth) {
@@ -173,70 +291,191 @@ export default function LoginScreen() {
           <Text style={styles.subtitle}>Medical Services</Text>
         </View>
 
-        {/* Login Form */}
+        {/* Login / Signup / Forgot Password Form */}
         <View style={styles.formCard}>
-          <Text style={styles.formTitle}>Doctor Login</Text>
-          
-          {/* Phone Number Input */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Mobile Number</Text>
-            <View style={styles.phoneWrapper}>
-              <View style={styles.prefixBox}>
-                <Text style={styles.prefix}>+91</Text>
+          <Text style={styles.formTitle}>{isSignup ? 'Sign Up' : 'Doctor Login'}</Text>
+
+          {isForgotPasswordMode ? (
+            <>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Email</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={email}
+                  onChangeText={(t) => { setEmail(t); setError(''); setSuccessMessage(''); }}
+                  keyboardType="email-address"
+                  placeholder="Enter your email"
+                  placeholderTextColor="#9CA3AF"
+                  editable={!isLoading}
+                  autoCapitalize="none"
+                />
               </View>
-              <TextInput
-                style={styles.phoneInput}
-                value={phoneNumber}
-                onChangeText={handlePhoneChange}
-                keyboardType="phone-pad"
-                maxLength={10}
-                placeholder="Enter 10-digit number"
-                placeholderTextColor="#9CA3AF"
-                autoFocus
-                editable={!isLoading}
-              />
-            </View>
-          </View>
 
-          {/* PIN Input */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Security PIN</Text>
-            <TextInput
-              style={styles.pinInput}
-              value={pin}
-              onChangeText={handlePinChange}
-              keyboardType="numeric"
-              secureTextEntry
-              maxLength={4}
-              placeholder="Enter 4-digit PIN"
-              placeholderTextColor="#9CA3AF"
-              editable={!isLoading}
-            />
-          </View>
+              {error ? (
+                <View style={styles.errorBox}>
+                  <Text style={styles.errorText}>⚠ {error}</Text>
+                </View>
+              ) : null}
 
-          {/* Error Message */}
-          {error ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>⚠ {error}</Text>
-            </View>
-          ) : null}
+              {successMessage ? (
+                <View style={[styles.errorBox, { backgroundColor: '#ECFDF5', borderLeftColor: '#059669' }]}>
+                  <Text style={[styles.errorText, { color: '#065F46' }]}>{successMessage}</Text>
+                </View>
+              ) : null}
 
-          {/* Login Button */}
-          <TouchableOpacity
-            style={[
-              styles.loginButton,
-              (!isFormValid || isLoading) && styles.loginButtonDisabled,
-            ]}
-            onPress={handleLogin}
-            disabled={!isFormValid || isLoading}
-            activeOpacity={0.8}
-          >
-            {isLoading ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
-            ) : (
-              <Text style={styles.loginButtonText}>Sign In</Text>
-            )}
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.loginButton, (!validateEmail(email) || isLoading) && styles.loginButtonDisabled]}
+                onPress={handleForgotPassword}
+                disabled={!validateEmail(email) || isLoading}
+              >
+                {isLoading ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.loginButtonText}>Send Reset</Text>}
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.forgotPasswordButton} onPress={() => { setIsForgotPasswordMode(false); setError(''); setSuccessMessage(''); }}>
+                <Text style={styles.forgotPasswordText}>Back to Sign In</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              {/* Phone Number Input */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Mobile Number</Text>
+                <View style={styles.phoneWrapper}>
+                  <View style={styles.prefixBox}>
+                    <Text style={styles.prefix}>+91</Text>
+                  </View>
+                  <TextInput
+                    style={styles.phoneInput}
+                    value={phoneNumber}
+                    onChangeText={handlePhoneChange}
+                    keyboardType="phone-pad"
+                    maxLength={10}
+                    placeholder="Enter 10-digit number"
+                    placeholderTextColor="#9CA3AF"
+                    autoFocus
+                    editable={!isLoading}
+                  />
+                </View>
+              </View>
+
+              {/* PIN Input */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Security PIN</Text>
+                <TextInput
+                  style={styles.pinInput}
+                  value={pin}
+                  onChangeText={handlePinChange}
+                  keyboardType="numeric"
+                  secureTextEntry
+                  maxLength={4}
+                  placeholder="Enter 4-digit PIN"
+                  placeholderTextColor="#9CA3AF"
+                  editable={!isLoading}
+                />
+              </View>
+
+              {/* Signup Fields */}
+              {isSignup && (
+                <>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Doctor Name</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      value={doctorName}
+                      onChangeText={(t) => { setDoctorName(t); setError(''); }}
+                      placeholder="Enter your name"
+                      placeholderTextColor="#9CA3AF"
+                      editable={!isLoading}
+                      autoCapitalize="words"
+                    />
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Room Number</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      value={roomNumber}
+                      onChangeText={(t) => { setRoomNumber(t); setError(''); }}
+                      placeholder="e.g., 301, ICU-2"
+                      placeholderTextColor="#9CA3AF"
+                      editable={!isLoading}
+                    />
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Email</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      value={email}
+                      onChangeText={(t) => { setEmail(t); setError(''); }}
+                      keyboardType="email-address"
+                      placeholder="Enter email"
+                      placeholderTextColor="#9CA3AF"
+                      editable={!isLoading}
+                      autoCapitalize="none"
+                    />
+                  </View>
+                </>
+              )}
+
+              {/* Error / Success Message */}
+              {error ? (
+                <View style={styles.errorBox}>
+                  <Text style={styles.errorText}>⚠ {error}</Text>
+                </View>
+              ) : null}
+
+              {successMessage ? (
+                <View style={[styles.errorBox, { backgroundColor: '#ECFDF5', borderLeftColor: '#059669' }]}>
+                  <Text style={[styles.errorText, { color: '#065F46' }]}>{successMessage}</Text>
+                </View>
+              ) : null}
+
+              {/* Login / Signup Button */}
+              <TouchableOpacity
+                style={[
+                  styles.loginButton,
+                  ((isSignup && !isSignupFormValid) || (!isSignup && !isFormValid) || isLoading) && styles.loginButtonDisabled,
+                ]}
+                onPress={isSignup ? handleSignup : handleLogin}
+                disabled={(isSignup ? !isSignupFormValid : !isFormValid) || isLoading}
+                activeOpacity={0.8}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.loginButtonText}>{isSignup ? 'Create Account' : 'Sign In'}</Text>
+                )}
+              </TouchableOpacity>
+
+              {/* Secondary actions */}
+              <TouchableOpacity
+                style={styles.forgotPasswordButton}
+                onPress={() => { setIsForgotPasswordMode(true); setError(''); setSuccessMessage(''); }}
+              >
+                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.forgotPasswordButton}
+                onPress={() => { 
+                  setIsSignup(!isSignup); 
+                  setError(''); 
+                  setSuccessMessage('');
+                  // Clear signup fields when switching modes
+                  if (!isSignup) {
+                    setDoctorName('');
+                    setRoomNumber('');
+                    setEmail('');
+                  }
+                }}
+              >
+                <Text style={styles.forgotPasswordText}>
+                  {isSignup ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
         {/* Footer */}
@@ -244,18 +483,6 @@ export default function LoginScreen() {
           Authorized medical personnel only
         </Text>
       </ScrollView>
-
-      {/* Custom Alert */}
-      <CustomAlert
-        visible={showAlert}
-        title={alertData.title}
-        message={alertData.message}
-        type={alertData.type}
-        confirmText="OK"
-        onConfirm={() => setShowAlert(false)}
-        onCancel={() => setShowAlert(false)}
-        singleButton={true}
-      />
     </KeyboardAvoidingView>
   );
 }
@@ -388,6 +615,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 6,
     textAlign: 'center',
+  },
+  textInput: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    color: '#1E293B',
+    fontWeight: '500',
   },
 
   // Error
