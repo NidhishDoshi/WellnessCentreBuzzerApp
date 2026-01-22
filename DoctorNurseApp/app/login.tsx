@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,13 @@ import * as Crypto from 'expo-crypto';
 
 const GOOGLE_SHEETS_API_URL = 'https://script.google.com/macros/s/AKfycbzBQLrPT7d7RySISRrxWC_wZfdDEWFDwcIKb39lyHuPCxlmfgGULfeSUmld8Wz2xvXn/exec';
 
+// Forgot password steps
+const FORGOT_PASSWORD_STEPS = {
+  EMAIL: 'email',
+  OTP: 'otp',
+  NEW_PIN: 'new_pin'
+};
+
 export default function LoginScreen() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [pin, setPin] = useState('');
@@ -28,11 +35,49 @@ export default function LoginScreen() {
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isSignup, setIsSignup] = useState(false);
   const [isForgotPasswordMode, setIsForgotPasswordMode] = useState(false);
+  
+  // Forgot password states
+  const [forgotPasswordStep, setForgotPasswordStep] = useState(FORGOT_PASSWORD_STEPS.EMAIL);
+  const [otp, setOtp] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmNewPin, setConfirmNewPin] = useState('');
+  const [timer, setTimer] = useState(0);
+  const [canResend, setCanResend] = useState(false);
+  const timerRef = useRef(null);
 
-  // Check for existing session on mount
   useEffect(() => {
     checkExistingSession();
   }, []);
+
+  useEffect(() => {
+    // Cleanup timer on unmount
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    // Start countdown timer
+    if (timer > 0) {
+      timerRef.current = setInterval(() => {
+        setTimer((prev) => {
+          if (prev <= 1) {
+            setCanResend(true);
+            clearInterval(timerRef.current);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [timer]);
 
   const checkExistingSession = async () => {
     try {
@@ -41,7 +86,6 @@ export default function LoginScreen() {
       const savedName = await AsyncStorage.getItem('doctorName');
       const savedRoom = await AsyncStorage.getItem('doctorRoom');
 
-      // If all required data exists, auto-login
       if (loggedIn === 'true' && savedPhone && savedName && savedRoom) {
         console.log('✅ Auto-login: Session found for', savedName);
         router.replace('/(doctor)/home');
@@ -64,6 +108,11 @@ export default function LoginScreen() {
 
   const validateEmail = (value: string) => {
     return /^\S+@\S+\.\S+$/.test(value);
+  };
+
+  const startTimer = (seconds: number) => {
+    setTimer(seconds);
+    setCanResend(false);
   };
 
   const handleLogin = async () => {
@@ -200,21 +249,19 @@ export default function LoginScreen() {
     }
   };
 
-  const handleForgotPassword = async () => {
+  const handleSendOTP = async () => {
     setError('');
     setSuccessMessage('');
 
     if (!validateEmail(email)) {
-      setError('Please enter a valid email to reset');
+      setError('Please enter a valid email');
       return;
     }
 
     setIsLoading(true);
     try {
       const response = await fetch(
-        `${GOOGLE_SHEETS_API_URL}?action=forgotPassword&email=${encodeURIComponent(
-          email
-        )}`,
+        `${GOOGLE_SHEETS_API_URL}?action=sendOTP&email=${encodeURIComponent(email)}`,
         {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
@@ -223,17 +270,113 @@ export default function LoginScreen() {
       const data = await response.json();
 
       if (data.success) {
-        setSuccessMessage(data.message || 'Password reset instructions sent');
-        setIsForgotPasswordMode(false);
+        setSuccessMessage(`OTP sent to ${email}`);
+        setForgotPasswordStep(FORGOT_PASSWORD_STEPS.OTP);
+        startTimer(120); // 2 minutes timer
       } else {
-        setError(data.message || 'Could not process request');
+        setError(data.message || 'Failed to send OTP');
       }
     } catch (err) {
-      console.error('Forgot password error:', err);
+      console.error('Send OTP error:', err);
       setError('Connection failed. Please check your internet and try again.');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleVerifyOTP = async () => {
+    setError('');
+    setSuccessMessage('');
+
+    if (otp.length !== 6) {
+      setError('Please enter the 6-digit OTP');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetch(GOOGLE_SHEETS_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'verifyOTP',
+          email: email,
+          otp: otp
+        })
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        setSuccessMessage('OTP verified! Please set your new PIN');
+        setForgotPasswordStep(FORGOT_PASSWORD_STEPS.NEW_PIN);
+      } else {
+        setError(data.message || 'Invalid OTP');
+      }
+    } catch (err) {
+      console.error('Verify OTP error:', err);
+      setError('Connection failed. Please check your internet and try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    setError('');
+    setSuccessMessage('');
+
+    if (newPin.length !== 4) {
+      setError('PIN must be 4 digits');
+      return;
+    }
+
+    if (newPin !== confirmNewPin) {
+      setError('PINs do not match');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const hashedPIN = await hashPIN(newPin);
+
+      const response = await fetch(GOOGLE_SHEETS_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'resetPassword',
+          email: email,
+          otp: otp,
+          newPin: hashedPIN
+        })
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        setSuccessMessage('Password reset successful! Please login with your new PIN');
+        setTimeout(() => {
+          resetForgotPasswordFlow();
+        }, 2000);
+      } else {
+        setError(data.message || 'Failed to reset password');
+      }
+    } catch (err) {
+      console.error('Reset password error:', err);
+      setError('Connection failed. Please check your internet and try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const resetForgotPasswordFlow = () => {
+    setIsForgotPasswordMode(false);
+    setForgotPasswordStep(FORGOT_PASSWORD_STEPS.EMAIL);
+    setEmail('');
+    setOtp('');
+    setNewPin('');
+    setConfirmNewPin('');
+    setError('');
+    setSuccessMessage('');
+    setTimer(0);
+    setCanResend(false);
   };
 
   const handlePhoneChange = (text: string) => {
@@ -252,6 +395,36 @@ export default function LoginScreen() {
     }
   };
 
+  const handleOtpChange = (text: string) => {
+    const numericText = text.replace(/[^0-9]/g, '');
+    if (numericText.length <= 6) {
+      setOtp(numericText);
+      setError('');
+    }
+  };
+
+  const handleNewPinChange = (text: string) => {
+    const numericText = text.replace(/[^0-9]/g, '');
+    if (numericText.length <= 4) {
+      setNewPin(numericText);
+      setError('');
+    }
+  };
+
+  const handleConfirmNewPinChange = (text: string) => {
+    const numericText = text.replace(/[^0-9]/g, '');
+    if (numericText.length <= 4) {
+      setConfirmNewPin(numericText);
+      setError('');
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const isFormValid = phoneNumber.length === 10 && pin.length === 4;
   const isSignupFormValid = 
     phoneNumber.length === 10 && 
@@ -260,7 +433,6 @@ export default function LoginScreen() {
     roomNumber.trim().length > 0 &&
     validateEmail(email);
 
-  // Show loading screen while checking for existing session
   if (isCheckingAuth) {
     return (
       <View style={styles.loadingContainer}>
@@ -293,46 +465,182 @@ export default function LoginScreen() {
 
         {/* Login / Signup / Forgot Password Form */}
         <View style={styles.formCard}>
-          <Text style={styles.formTitle}>{isSignup ? 'Sign Up' : 'Doctor Login'}</Text>
+          <Text style={styles.formTitle}>
+            {isSignup ? 'Sign Up' : isForgotPasswordMode ? 'Reset Password' : 'Doctor Login'}
+          </Text>
 
           {isForgotPasswordMode ? (
             <>
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Email</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={email}
-                  onChangeText={(t) => { setEmail(t); setError(''); setSuccessMessage(''); }}
-                  keyboardType="email-address"
-                  placeholder="Enter your email"
-                  placeholderTextColor="#9CA3AF"
-                  editable={!isLoading}
-                  autoCapitalize="none"
-                />
-              </View>
+              {/* STEP 1: Enter Email */}
+              {forgotPasswordStep === FORGOT_PASSWORD_STEPS.EMAIL && (
+                <>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Email Address</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      value={email}
+                      onChangeText={(t) => { setEmail(t); setError(''); setSuccessMessage(''); }}
+                      keyboardType="email-address"
+                      placeholder="Enter your registered email"
+                      placeholderTextColor="#9CA3AF"
+                      editable={!isLoading}
+                      autoCapitalize="none"
+                    />
+                  </View>
 
-              {error ? (
-                <View style={styles.errorBox}>
-                  <Text style={styles.errorText}>⚠ {error}</Text>
-                </View>
-              ) : null}
+                  {error ? (
+                    <View style={styles.errorBox}>
+                      <Text style={styles.errorText}>⚠ {error}</Text>
+                    </View>
+                  ) : null}
 
-              {successMessage ? (
-                <View style={[styles.errorBox, { backgroundColor: '#ECFDF5', borderLeftColor: '#059669' }]}>
-                  <Text style={[styles.errorText, { color: '#065F46' }]}>{successMessage}</Text>
-                </View>
-              ) : null}
+                  {successMessage ? (
+                    <View style={[styles.errorBox, { backgroundColor: '#ECFDF5', borderLeftColor: '#059669' }]}>
+                      <Text style={[styles.errorText, { color: '#065F46' }]}>{successMessage}</Text>
+                    </View>
+                  ) : null}
+
+                  <TouchableOpacity
+                    style={[styles.loginButton, (!validateEmail(email) || isLoading) && styles.loginButtonDisabled]}
+                    onPress={handleSendOTP}
+                    disabled={!validateEmail(email) || isLoading}
+                  >
+                    {isLoading ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <Text style={styles.loginButtonText}>Send OTP</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {/* STEP 2: Enter OTP */}
+              {forgotPasswordStep === FORGOT_PASSWORD_STEPS.OTP && (
+                <>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Enter OTP</Text>
+                    <Text style={styles.helperText}>OTP sent to {email}</Text>
+                    <TextInput
+                      style={styles.otpInput}
+                      value={otp}
+                      onChangeText={handleOtpChange}
+                      keyboardType="numeric"
+                      maxLength={6}
+                      placeholder="Enter 6-digit OTP"
+                      placeholderTextColor="#9CA3AF"
+                      editable={!isLoading}
+                    />
+                  </View>
+
+                  {timer > 0 && (
+                    <View style={styles.timerBox}>
+                      <Text style={styles.timerText}>⏱ OTP expires in {formatTime(timer)}</Text>
+                    </View>
+                  )}
+
+                  {canResend && (
+                    <TouchableOpacity
+                      style={styles.resendButton}
+                      onPress={handleSendOTP}
+                      disabled={isLoading}
+                    >
+                      <Text style={styles.resendText}>Resend OTP</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {error ? (
+                    <View style={styles.errorBox}>
+                      <Text style={styles.errorText}>⚠ {error}</Text>
+                    </View>
+                  ) : null}
+
+                  {successMessage ? (
+                    <View style={[styles.errorBox, { backgroundColor: '#ECFDF5', borderLeftColor: '#059669' }]}>
+                      <Text style={[styles.errorText, { color: '#065F46' }]}>{successMessage}</Text>
+                    </View>
+                  ) : null}
+
+                  <TouchableOpacity
+                    style={[styles.loginButton, (otp.length !== 6 || isLoading) && styles.loginButtonDisabled]}
+                    onPress={handleVerifyOTP}
+                    disabled={otp.length !== 6 || isLoading}
+                  >
+                    {isLoading ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <Text style={styles.loginButtonText}>Verify OTP</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {/* STEP 3: Set New PIN */}
+              {forgotPasswordStep === FORGOT_PASSWORD_STEPS.NEW_PIN && (
+                <>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>New 4-digit PIN</Text>
+                    <TextInput
+                      style={styles.pinInput}
+                      value={newPin}
+                      onChangeText={handleNewPinChange}
+                      keyboardType="numeric"
+                      secureTextEntry
+                      maxLength={4}
+                      placeholder="Enter new PIN"
+                      placeholderTextColor="#9CA3AF"
+                      editable={!isLoading}
+                    />
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Confirm New PIN</Text>
+                    <TextInput
+                      style={styles.pinInput}
+                      value={confirmNewPin}
+                      onChangeText={handleConfirmNewPinChange}
+                      keyboardType="numeric"
+                      secureTextEntry
+                      maxLength={4}
+                      placeholder="Re-enter new PIN"
+                      placeholderTextColor="#9CA3AF"
+                      editable={!isLoading}
+                    />
+                  </View>
+
+                  {error ? (
+                    <View style={styles.errorBox}>
+                      <Text style={styles.errorText}>⚠ {error}</Text>
+                    </View>
+                  ) : null}
+
+                  {successMessage ? (
+                    <View style={[styles.errorBox, { backgroundColor: '#ECFDF5', borderLeftColor: '#059669' }]}>
+                      <Text style={[styles.errorText, { color: '#065F46' }]}>{successMessage}</Text>
+                    </View>
+                  ) : null}
+
+                  <TouchableOpacity
+                    style={[
+                      styles.loginButton,
+                      (newPin.length !== 4 || confirmNewPin.length !== 4 || isLoading) && styles.loginButtonDisabled
+                    ]}
+                    onPress={handleResetPassword}
+                    disabled={newPin.length !== 4 || confirmNewPin.length !== 4 || isLoading}
+                  >
+                    {isLoading ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <Text style={styles.loginButtonText}>Reset Password</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
 
               <TouchableOpacity
-                style={[styles.loginButton, (!validateEmail(email) || isLoading) && styles.loginButtonDisabled]}
-                onPress={handleForgotPassword}
-                disabled={!validateEmail(email) || isLoading}
+                style={styles.forgotPasswordButton}
+                onPress={resetForgotPasswordFlow}
               >
-                {isLoading ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.loginButtonText}>Send Reset</Text>}
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.forgotPasswordButton} onPress={() => { setIsForgotPasswordMode(false); setError(''); setSuccessMessage(''); }}>
-                <Text style={styles.forgotPasswordText}>Back to Sign In</Text>
+                <Text style={styles.forgotPasswordText}>← Back to Sign In</Text>
               </TouchableOpacity>
             </>
           ) : (
@@ -449,12 +757,18 @@ export default function LoginScreen() {
               </TouchableOpacity>
 
               {/* Secondary actions */}
-              <TouchableOpacity
-                style={styles.forgotPasswordButton}
-                onPress={() => { setIsForgotPasswordMode(true); setError(''); setSuccessMessage(''); }}
-              >
-                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-              </TouchableOpacity>
+              {!isSignup && (
+                <TouchableOpacity
+                  style={styles.forgotPasswordButton}
+                  onPress={() => {
+                    setIsForgotPasswordMode(true);
+                    setError('');
+                    setSuccessMessage('');
+                  }}
+                >
+                  <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+                </TouchableOpacity>
+              )}
 
               <TouchableOpacity
                 style={styles.forgotPasswordButton}
@@ -462,7 +776,6 @@ export default function LoginScreen() {
                   setIsSignup(!isSignup); 
                   setError(''); 
                   setSuccessMessage('');
-                  // Clear signup fields when switching modes
                   if (!isSignup) {
                     setDoctorName('');
                     setRoomNumber('');
@@ -514,7 +827,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // Header
   header: {
     alignItems: 'center',
     marginBottom: 32,
@@ -546,7 +858,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // Form Card
   formCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -565,7 +876,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Input Group
   inputGroup: {
     marginBottom: 20,
   },
@@ -573,6 +883,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#475569',
+    marginBottom: 8,
+  },
+  helperText: {
+    fontSize: 12,
+    color: '#64748B',
     marginBottom: 8,
   },
   phoneWrapper: {
@@ -616,6 +931,19 @@ const styles = StyleSheet.create({
     letterSpacing: 6,
     textAlign: 'center',
   },
+  otpInput: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    fontSize: 20,
+    color: '#1E293B',
+    fontWeight: '600',
+    letterSpacing: 8,
+    textAlign: 'center',
+  },
   textInput: {
     backgroundColor: '#F8FAFC',
     borderWidth: 1.5,
@@ -628,7 +956,30 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // Error
+  timerBox: {
+    backgroundColor: '#FEF3C7',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  timerText: {
+    fontSize: 13,
+    color: '#92400E',
+    fontWeight: '600',
+  },
+
+  resendButton: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  resendText: {
+    fontSize: 14,
+    color: '#2563EB',
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+
   errorBox: {
     backgroundColor: '#FEF2F2',
     borderLeftWidth: 3,
@@ -643,7 +994,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // Login Button
   loginButton: {
     backgroundColor: '#2563EB',
     paddingVertical: 16,
@@ -663,7 +1013,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // Forgot Password
   forgotPasswordButton: {
     marginTop: 16,
     alignItems: 'center',
@@ -674,7 +1023,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // Footer
   footer: {
     marginTop: 24,
     fontSize: 12,
