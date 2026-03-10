@@ -1,5 +1,5 @@
 // Configuration
-const SERVER_URL = 'http://127.0.0.1:3000'; // Change this to your server IP
+const SERVER_URL = 'http://10.200.204.203:3000'; // Change this to your server IP
 const CALL_TYPE = 'nurse'; // Filter for nurse calls only
 
 // Initialize Socket.IO connection

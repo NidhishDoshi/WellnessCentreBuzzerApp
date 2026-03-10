@@ -148,5 +148,5 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Allowed IP range: ${process.env.ALLOWED_IP_RANGE || '192.168.1.0/24'}`);
+  console.log(`Allowed IP range: ${process.env.ALLOWED_IP_RANGE || '10.200.204./24'}`);
 });

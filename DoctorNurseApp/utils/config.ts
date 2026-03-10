@@ -2,7 +2,7 @@
 // Declare __DEV__ for TypeScript
 declare const __DEV__: boolean;
 //wellness ip :'10.200.205.182' around range
-const SERVER_IP = '192.168.0.194'; // <-- Change this to your server's IP address
+const SERVER_IP = '10.200.204.203'; // <-- Change this to your server's IP address
 const SERVER_PORT = '3000';
 // ========================================
 
