@@ -23,6 +23,7 @@ import {
   sendDoctorCall,
   sendReceptionCall,
   completeCall,
+  syncDoctorState,
   addConnectionListener,
   isConnected,
 } from '../../utils/socket';
@@ -33,7 +34,7 @@ type CallStatus = 'idle' | 'active';
 export default function DoctorHomeScreen() {
   const [nurseCallStatus, setNurseCallStatus] = useState<CallStatus>('idle');
   const [nurseCallTime, setNurseCallTime] = useState<Date | null>(null);
-  const [nurseRemainingSeconds, setNurseRemainingSeconds] = useState(600);
+  const [nurseRemainingSeconds, setNurseRemainingSeconds] = useState(300);
 
   const [receptionCallStatus, setReceptionCallStatus] = useState<CallStatus>('idle');
   const [receptionCallTime, setReceptionCallTime] = useState<Date | null>(null);
@@ -47,6 +48,7 @@ export default function DoctorHomeScreen() {
 
   const currentNurseCallId = useRef<string | number | null>(null);
   const currentReceptionCallId = useRef<string | number | null>(null);
+  const doctorCallKey = useRef<string>('');
   const appState = useRef(AppState.currentState);
 
   // Alert states for Nurse
@@ -101,14 +103,14 @@ export default function DoctorHomeScreen() {
         const startTime = new Date(savedNurseCallTime);
         const now = new Date();
         const elapsedSeconds = Math.floor((now.getTime() - startTime.getTime()) / 1000);
-        const remaining = 600 - elapsedSeconds;
+        const remaining = 300 - elapsedSeconds;
 
         setNurseCallStatus('active');
         setNurseCallTime(startTime);
         setNurseRemainingSeconds(remaining);
         
         if (savedNurseCallId) {
-          currentNurseCallId.current = parseInt(savedNurseCallId);
+          currentNurseCallId.current = savedNurseCallId;
         }
 
         console.log('Restored nurse call state:', {
@@ -126,14 +128,14 @@ export default function DoctorHomeScreen() {
         const startTime = new Date(savedReceptionCallTime);
         const now = new Date();
         const elapsedSeconds = Math.floor((now.getTime() - startTime.getTime()) / 1000);
-        const remaining = 600 - elapsedSeconds;
+        const remaining = 210 - elapsedSeconds;
 
         setReceptionCallStatus('active');
         setReceptionCallTime(startTime);
         setReceptionRemainingSeconds(remaining);
         
         if (savedReceptionCallId) {
-          currentReceptionCallId.current = parseInt(savedReceptionCallId);
+          currentReceptionCallId.current = savedReceptionCallId;
         }
 
         console.log('Restored reception call state:', {
@@ -198,6 +200,42 @@ export default function DoctorHomeScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!serverConnected) return;
+
+    const doctorId = doctorCallKey.current || doctorName;
+    if (!doctorId) return;
+
+    if (nurseCallStatus === 'active') {
+      syncDoctorState({
+        doctorId,
+        doctorName,
+        room: doctorRoom.replace('Room ', ''),
+        hasActiveCall: true,
+        type: 'nurse',
+      });
+      return;
+    }
+
+    if (receptionCallStatus === 'active') {
+      syncDoctorState({
+        doctorId,
+        doctorName,
+        room: doctorRoom.replace('Room ', ''),
+        hasActiveCall: true,
+        type: 'reception',
+      });
+      return;
+    }
+
+    syncDoctorState({
+      doctorId,
+      doctorName,
+      room: doctorRoom.replace('Room ', ''),
+      hasActiveCall: false,
+    });
+  }, [serverConnected, nurseCallStatus, receptionCallStatus, doctorName, doctorRoom]);
+
   // Load doctor data and setup audio
   useEffect(() => {
     loadDoctorData();
@@ -217,11 +255,14 @@ export default function DoctorHomeScreen() {
 
   const loadDoctorData = async () => {
     try {
+      const phone = await AsyncStorage.getItem('doctorPhone');
       const name = await AsyncStorage.getItem('doctorName');
       const room = await AsyncStorage.getItem('doctorRoom');
       const formattedRoom = room 
         ? (room.startsWith('Room') ? room : `Room ${room}`)
         : 'Room';
+
+      doctorCallKey.current = phone || name || 'unknown-doctor';
       
       setDoctorName(name || 'Doctor');
       setDoctorRoom(formattedRoom);
@@ -272,7 +313,7 @@ export default function DoctorHomeScreen() {
   const handleConfirmCallNurse = async () => {
     setCallNurseAlert(false);
     
-    const callId = Date.now();
+    const callId = doctorCallKey.current || doctorName || 'unknown-doctor';
     currentNurseCallId.current = callId;
     
     const sent = sendDoctorCall({
@@ -289,7 +330,7 @@ export default function DoctorHomeScreen() {
     const startTime = new Date();
     setNurseCallStatus('active');
     setNurseCallTime(startTime);
-    setNurseRemainingSeconds(600);
+    setNurseRemainingSeconds(300);
     await playNotificationSound('success');
   };
 
@@ -310,7 +351,7 @@ export default function DoctorHomeScreen() {
     
     setNurseCallStatus('idle');
     setNurseCallTime(null);
-    setNurseRemainingSeconds(600);
+    setNurseRemainingSeconds(300);
     
     await AsyncStorage.multiRemove(['nurseCallStatus', 'nurseCallTime', 'currentNurseCallId']);
     
@@ -324,7 +365,7 @@ export default function DoctorHomeScreen() {
       completeCall(currentNurseCallId.current);
     }
     
-    const newCallId = Date.now();
+    const newCallId = doctorCallKey.current || doctorName || 'unknown-doctor';
     currentNurseCallId.current = newCallId;
     
     sendDoctorCall({
@@ -335,7 +376,7 @@ export default function DoctorHomeScreen() {
     
     const newStartTime = new Date();
     setNurseCallTime(newStartTime);
-    setNurseRemainingSeconds(600);
+    setNurseRemainingSeconds(300);
     await playNotificationSound('info');
   };
 
@@ -349,7 +390,7 @@ export default function DoctorHomeScreen() {
     
     setNurseCallStatus('idle');
     setNurseCallTime(null);
-    setNurseRemainingSeconds(600);
+    setNurseRemainingSeconds(300);
     
     await AsyncStorage.multiRemove(['nurseCallStatus', 'nurseCallTime', 'currentNurseCallId']);
     
@@ -366,7 +407,7 @@ export default function DoctorHomeScreen() {
     
     setNurseCallStatus('idle');
     setNurseCallTime(null);
-    setNurseRemainingSeconds(600);
+    setNurseRemainingSeconds(300);
     
     await AsyncStorage.multiRemove(['nurseCallStatus', 'nurseCallTime', 'currentNurseCallId']);
   };
@@ -409,7 +450,7 @@ export default function DoctorHomeScreen() {
   const handleConfirmCallReception = async () => {
     setCallReceptionAlert(false);
     
-    const callId = Date.now() + 1; // Add 1 to avoid collision with nurse call
+    const callId = doctorCallKey.current || doctorName || 'unknown-doctor';
     currentReceptionCallId.current = callId;
     
     const sent = sendReceptionCall({
@@ -461,7 +502,7 @@ export default function DoctorHomeScreen() {
       completeCall(currentReceptionCallId.current);
     }
     
-    const newCallId = Date.now() + 1;
+    const newCallId = doctorCallKey.current || doctorName || 'unknown-doctor';
     currentReceptionCallId.current = newCallId;
     
     sendReceptionCall({
@@ -535,7 +576,7 @@ export default function DoctorHomeScreen() {
       interval = setInterval(() => {
         const now = new Date();
         const elapsedSeconds = Math.floor((now.getTime() - nurseCallTime.getTime()) / 1000);
-        const remaining = Math.max(0, 600 - elapsedSeconds); // Stop at 0, don't go negative
+        const remaining = Math.max(0, 300 - elapsedSeconds); // Stop at 0, don't go negative
         setNurseRemainingSeconds(remaining);
       }, 1000);
     }
@@ -552,7 +593,7 @@ export default function DoctorHomeScreen() {
     }
   }, [nurseRemainingSeconds, nurseCallStatus]);
 
-  // Check for 10 minute mark (nurse timer expired)
+  // Check for 5 minute mark (nurse timer expired)
   useEffect(() => {
     if (nurseCallStatus === 'active' && nurseRemainingSeconds === 0) {
       setTimerNurseExpiredAlert(true);
@@ -560,12 +601,12 @@ export default function DoctorHomeScreen() {
     }
   }, [nurseRemainingSeconds, nurseCallStatus]);
 
-  // Check for auto mark attended after 10 minutes (nurse) - if user doesn't respond after timer expires
+  // Check for auto mark attended after 5 minutes (nurse) - if user doesn't respond after timer expires
   useEffect(() => {
     let timeoutId: ReturnType<typeof setTimeout>;
     
     if (nurseCallStatus === 'active' && nurseCallTime && nurseRemainingSeconds === 0) {
-      // Set timeout for 10 minutes after the timer reached 0
+      // Set timeout for 5 minutes after the timer reached 0
       timeoutId = setTimeout(async () => {
         setAutoMarkNurseAlert(true);
         playNotificationSound('warning');
@@ -578,10 +619,10 @@ export default function DoctorHomeScreen() {
         setTimeout(async () => {
           setNurseCallStatus('idle');
           setNurseCallTime(null);
-          setNurseRemainingSeconds(600);
+          setNurseRemainingSeconds(300);
           await AsyncStorage.multiRemove(['nurseCallStatus', 'nurseCallTime', 'currentNurseCallId']);
         }, 3000);
-      }, 600000); // Wait 10 more minutes after timer expires
+      }, 300000); // Wait 5 more minutes after timer expires
     }
     
     return () => {
@@ -886,7 +927,7 @@ export default function DoctorHomeScreen() {
       <CustomAlert
         visible={timerNurseExpiredAlert}
         title="Expected Time Reached"
-        message="The expected 10-minute wait time has passed. Would you like to call the nurse again or mark as attended?"
+        message="The expected 5-minute wait time has passed. Would you like to call the nurse again or mark as attended?"
         type="info"
         confirmText="Call Again"
         cancelText="Mark Attended"
@@ -897,7 +938,7 @@ export default function DoctorHomeScreen() {
       <CustomAlert
         visible={autoMarkNurseAlert}
         title="Auto-Marked as Attended"
-        message="The nurse call has been active for 20 minutes and has been automatically marked as attended."
+        message="The nurse call has been active for 10 minutes and has been automatically marked as attended."
         type="info"
         confirmText="OK"
         cancelText=""

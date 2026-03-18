@@ -1,6 +1,7 @@
 // Configuration
-const SERVER_URL = 'http://10.200.204.203:3000'; // Change this to your server IP
+const SERVER_URL = 'http://10.200.204.165:3000'; // Change this to your server IP
 const CALL_TYPE = 'nurse'; // Filter for nurse calls only
+const CALL_TTL_MS = 5 * 60 * 1000; // Auto-remove card after 5 minutes
 
 // Initialize Socket.IO connection
 const socket = io(SERVER_URL);
@@ -13,6 +14,100 @@ let carouselInterval = null;
 let audioEnabled = false;
 let audioContext = null;
 let soundQueue = []; // Queue sounds if audio not ready yet
+const callExpiryTimers = new Map();
+
+function getDoctorKey(callOrId) {
+    if (callOrId && typeof callOrId === 'object') {
+        if (callOrId.doctorId !== undefined && callOrId.doctorId !== null) {
+            return String(callOrId.doctorId);
+        }
+        if (callOrId.id !== undefined && callOrId.id !== null) {
+            return String(callOrId.id).replace(/^doctor-/, '');
+        }
+        return '';
+    }
+
+    return String(callOrId).replace(/^doctor-/, '');
+}
+
+function dedupeCallsByDoctor(calls) {
+    const byDoctor = new Map();
+
+    calls.forEach(call => {
+        const doctorKey = getDoctorKey(call);
+        if (!doctorKey) return;
+
+        const existing = byDoctor.get(doctorKey);
+        if (!existing) {
+            byDoctor.set(doctorKey, call);
+            return;
+        }
+
+        const existingTime = new Date(existing.updatedAt || existing.timestamp || 0).getTime();
+        const incomingTime = new Date(call.updatedAt || call.timestamp || 0).getTime();
+        if (incomingTime >= existingTime) {
+            byDoctor.set(doctorKey, call);
+        }
+    });
+
+    return Array.from(byDoctor.values());
+}
+
+function isCallExpired(call) {
+    const callTime = new Date(call.timestamp).getTime();
+    if (Number.isNaN(callTime)) return false;
+    return (Date.now() - callTime) >= CALL_TTL_MS;
+}
+
+function pruneExpiredCalls(calls) {
+    return calls.filter(call => !isCallExpired(call));
+}
+
+function clearCallExpiryTimer(doctorKey) {
+    const timerId = callExpiryTimers.get(doctorKey);
+    if (timerId) {
+        clearTimeout(timerId);
+        callExpiryTimers.delete(doctorKey);
+    }
+}
+
+function scheduleCallExpiry(call) {
+    const doctorKey = getDoctorKey(call);
+    if (!doctorKey) return;
+
+    clearCallExpiryTimer(doctorKey);
+
+    const callTime = new Date(call.timestamp).getTime();
+    if (Number.isNaN(callTime)) return;
+
+    const remainingMs = CALL_TTL_MS - (Date.now() - callTime);
+
+    if (remainingMs <= 0) {
+        allCalls = allCalls.filter(existingCall => getDoctorKey(existingCall) !== doctorKey);
+        filterAndRenderCalls();
+        return;
+    }
+
+    const timerId = setTimeout(() => {
+        allCalls = allCalls.filter(existingCall => getDoctorKey(existingCall) !== doctorKey);
+        callExpiryTimers.delete(doctorKey);
+        filterAndRenderCalls();
+    }, remainingMs);
+
+    callExpiryTimers.set(doctorKey, timerId);
+}
+
+function syncExpiryTimers(calls) {
+    const activeKeys = new Set(calls.map(getDoctorKey));
+
+    for (const [doctorKey] of callExpiryTimers.entries()) {
+        if (!activeKeys.has(doctorKey)) {
+            clearCallExpiryTimer(doctorKey);
+        }
+    }
+
+    calls.forEach(scheduleCallExpiry);
+}
 
 // DOM Elements
 const carouselContainer = document.getElementById('carousel-container');
@@ -165,16 +260,28 @@ socket.on('disconnect', () => {
 
 socket.on('activeCalls', (calls) => {
     console.log('Received all active calls:', calls);
-    allCalls = calls;
+    allCalls = pruneExpiredCalls(dedupeCallsByDoctor(calls));
+    syncExpiryTimers(allCalls);
     filterAndRenderCalls();
 });
 
 socket.on('newNurseCall', (call) => {
     console.log('New nurse call received:', call);
     if (call.type === 'nurse') {
-        if (!allCalls.find(c => c.id === call.id)) {
+        if (isCallExpired(call)) {
+            return;
+        }
+
+        const incomingDoctorKey = getDoctorKey(call);
+        const existingIndex = allCalls.findIndex(c => getDoctorKey(c) === incomingDoctorKey);
+        if (existingIndex >= 0) {
+            allCalls[existingIndex] = call;
+        } else {
             allCalls.push(call);
         }
+
+        allCalls = pruneExpiredCalls(dedupeCallsByDoctor(allCalls));
+        syncExpiryTimers(allCalls);
         filterAndRenderCalls();
         
         // Play sound immediately
@@ -198,7 +305,9 @@ socket.on('newReceptionCall', (call) => {
 
 socket.on('callCompleted', (callId) => {
     console.log('Call completed:', callId);
-    allCalls = allCalls.filter(call => call.id !== callId);
+    const completedDoctorKey = getDoctorKey(callId);
+    clearCallExpiryTimer(completedDoctorKey);
+    allCalls = allCalls.filter(call => getDoctorKey(call) !== completedDoctorKey);
     filterAndRenderCalls();
 });
 
@@ -222,7 +331,9 @@ function updateConnectionStatus(connected) {
 
 // Render calls (filtered for nurse type only)
 function filterAndRenderCalls() {
-    nurseCalls = allCalls.filter(call => call.type === 'nurse');
+    allCalls = pruneExpiredCalls(allCalls);
+    syncExpiryTimers(allCalls);
+    nurseCalls = dedupeCallsByDoctor(allCalls.filter(call => call.type === 'nurse'));
     
     if (nurseCalls.length === 0) {
         showCarousel();
@@ -257,19 +368,19 @@ function createDoctorCard(call) {
     const elapsed = getElapsedTime(call.timestamp);
     
     // Get a consistent image for this doctor based on their ID
-    const imageIndex = Math.abs(hashCode(call.id)) % defaultDoctorImages.length;
+    const imageIndex = Math.abs(hashCode(call.doctorId || call.id)) % defaultDoctorImages.length;
     const doctorImage = call.doctorImage || defaultDoctorImages[imageIndex];
     
     return `
         <div class="doctor-card">
-            <div class="urgent-badge">🚨 URGENT</div>
+            <div class="urgent-badge"> URGENT</div>
             <div class="doctor-image-container">
                 <img src="${doctorImage}" alt="${call.doctorName}" class="doctor-image" onerror="this.src='${defaultDoctorImages[0]}'">
-                <div class="doctor-badge">🔔</div>
+                <div class="doctor-badge"></div>
             </div>
             <div class="doctor-name">${call.doctorName}</div>
             <div class="doctor-room">
-                <span class="doctor-room-icon">📍</span>
+                <span class="doctor-room-icon"></span>
                 <span>Room ${call.room}</span>
             </div>
             <div class="doctor-time">Called at ${time} • ${elapsed}</div>
@@ -466,10 +577,14 @@ if ('Notification' in window && Notification.permission === 'default') {
 
 // Show browser notification for new nurse calls
 socket.on('newNurseCall', (call) => {
+    if (isCallExpired(call)) {
+        return;
+    }
+
     if ('Notification' in window && Notification.permission === 'granted') {
         new Notification('Nurse Call Request', {
             body: `${call.doctorName} - Room ${call.room}`,
-            icon: '🔔',
+            icon: '',
             requireInteraction: true
         });
     }

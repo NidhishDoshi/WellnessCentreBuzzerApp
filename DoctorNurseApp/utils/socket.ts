@@ -157,6 +157,32 @@ export function completeCall(callId: string | number): boolean {
 }
 
 /**
+ * Sync doctor state to server (useful after reconnect)
+ */
+export function syncDoctorState(data: {
+  doctorId: string | number;
+  doctorName: string;
+  room: string;
+  hasActiveCall: boolean;
+  type?: 'nurse' | 'reception';
+}): boolean {
+  if (!socket?.connected) {
+    console.error('Cannot sync doctor state: Socket not connected');
+    return false;
+  }
+
+  socket.emit('syncDoctorState', {
+    doctorId: data.doctorId,
+    doctorName: data.doctorName,
+    room: data.room,
+    hasActiveCall: data.hasActiveCall,
+    type: data.type,
+  });
+
+  return true;
+}
+
+/**
  * Add a connection state listener
  */
 export function addConnectionListener(listener: ConnectionListener): () => void {
@@ -215,6 +241,7 @@ export default {
   sendDoctorCall,
   sendReceptionCall,
   completeCall,
+  syncDoctorState,
   addConnectionListener,
   addCallsListener,
   getServerUrl,
